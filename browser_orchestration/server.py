@@ -19,6 +19,10 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlmodel import select

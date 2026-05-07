@@ -16,6 +16,10 @@ import sys
 import textwrap
 from datetime import date, timedelta
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from cash_recon import service
 from cash_recon.models import (
     Invoice,

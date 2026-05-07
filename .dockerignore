@@ -1,0 +1,34 @@
+# Keep the build context small so docker push is fast.
+.git
+.github
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+.plaid_sandbox.json
+
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Frontend has its own deploy (Vercel) — don't bake node_modules in here.
+ops_dashboard/web/node_modules
+ops_dashboard/web/.next
+ops_dashboard/web/.vercel
+
+# ML artifacts get regenerated at first request via cash_recon.ranker.train()
+cash_recon/artifacts
+
+dist
+build
+*.egg-info

@@ -16,6 +16,10 @@ import os
 import sys
 import textwrap
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from browser_orchestration.harness_adapter import (
     MockHarness,
     script_clean_extraction,

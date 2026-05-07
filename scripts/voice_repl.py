@@ -19,6 +19,10 @@ import os
 import sys
 import textwrap
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from shared.db import init_schema, make_engine, session_scope
 from shared.models import Payer
 from shared.trust_engine import TrustEngine

@@ -12,6 +12,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from sqlmodel import select
 
 from browser_orchestration.harness_adapter import (

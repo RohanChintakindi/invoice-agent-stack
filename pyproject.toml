@@ -19,6 +19,15 @@ dependencies = [
     "scikit-learn>=1.5.0",
     "rapidfuzz>=3.10.0",
     "numpy>=2.0.0",
+    "plaid-python>=27.0.0",
+]
+
+[project.optional-dependencies]
+# Heavy / optional integrations. Install only when enabling the real
+# browser harness path: `uv sync --extra real-browser`.
+real-browser = [
+    "browser-use>=0.2.0",
+    "playwright>=1.49.0",
 ]
 
 [dependency-groups]
