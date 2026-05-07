@@ -19,14 +19,31 @@ export function TalkButton({ payerId, payerName }: { payerId: string; payerName:
     vapi.on("call-start", () => setPhase("live"));
     vapi.on("call-end", () => setPhase("idle"));
     vapi.on("error", (e) => {
-      // Surface a short, human-readable reason in the UI.
-      const msg =
-        typeof e === "string"
-          ? e
-          : (e as { errorMsg?: string; message?: string })?.errorMsg ??
-            (e as { message?: string })?.message ??
-            "vapi error";
-      setError(msg);
+      // Print the raw object so we can see the real shape in DevTools.
+      // The SDK varies what fields it populates — sometimes `error`,
+      // `errorMsg`, `message`, sometimes a nested action.error.
+      // eslint-disable-next-line no-console
+      console.error("[Vapi error]", e);
+      const obj = (e ?? {}) as Record<string, unknown>;
+      const candidates = [
+        obj.errorMsg,
+        obj.message,
+        (obj.error as Record<string, unknown> | undefined)?.message,
+        (obj.error as Record<string, unknown> | undefined)?.errorMsg,
+        obj.errorType,
+        obj.code,
+      ];
+      const friendly = candidates.find(
+        (v) => typeof v === "string" && v.length > 0,
+      );
+      const fallback = (() => {
+        try {
+          return JSON.stringify(e).slice(0, 200);
+        } catch {
+          return String(e);
+        }
+      })();
+      setError(typeof friendly === "string" ? friendly : fallback);
       setPhase("error");
     });
     vapiRef.current = vapi;
