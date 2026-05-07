@@ -1,0 +1,23 @@
+{
+  "fleet": {
+    "payers": 3,
+    "avg_trust_score": 0.467
+  },
+  "voice": {
+    "calls": 4
+  },
+  "browser": {
+    "jobs_total": 2,
+    "succeeded": 1,
+    "silent_fails": 1,
+    "silent_fail_rate": 0.5
+  },
+  "recon": {
+    "wires_total": 4,
+    "auto_matched": 3,
+    "under_review": 0,
+    "unmatched": 1,
+    "auto_match_rate": 0.75,
+    "human_overrides": 0
+  }
+}

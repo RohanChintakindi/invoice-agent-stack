@@ -1,0 +1,18 @@
+{
+  "payer_id": "globex",
+  "since_days": 60,
+  "points": [
+    {
+      "ts": "2026-03-08T19:35:39.912926+00:00",
+      "score": 0.5,
+      "kind": "baseline",
+      "delta": 0.0
+    },
+    {
+      "ts": "2026-05-07T19:35:39.913920+00:00",
+      "score": 0.5,
+      "kind": "now",
+      "delta": 0.0
+    }
+  ]
+}

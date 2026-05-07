@@ -1,0 +1,62 @@
+{
+  "payer_id": "zenith",
+  "name": "Zenith Industries",
+  "trust_score": 0.48,
+  "auto_match_threshold": 0.934,
+  "aliases": [
+    "ZENITH INDUSTRIES",
+    "ZENITHIND"
+  ],
+  "kpis": {
+    "calls": 1,
+    "promises_kept": 0,
+    "promises_broken": 0,
+    "browser_jobs": 1,
+    "silent_fails": 1,
+    "wires_auto_matched": 1,
+    "wires_under_review": 0
+  },
+  "calls": [
+    {
+      "id": 4,
+      "occurred_at": "2026-05-07T19:31:36.863796+00:00",
+      "summary": "Cold call. Recipient said wire goes out tomorrow morning.",
+      "outcome": "promise_made",
+      "duration_sec": null,
+      "contact_name": "Phil",
+      "invoice_id": null,
+      "final_phase": null,
+      "final_tone": null
+    }
+  ],
+  "promises": [],
+  "objections": [],
+  "jobs": [
+    {
+      "id": 2,
+      "portal_id": "zenith_portal",
+      "action": "extract_invoices",
+      "status": "silent_fail",
+      "attempts": 1,
+      "enqueued_at": "2026-05-07T19:31:36.918294+00:00",
+      "finished_at": "2026-05-07T19:31:36.958696+00:00",
+      "last_error": "extract_invoices returned no rows"
+    }
+  ],
+  "extractions": [],
+  "wires": [
+    {
+      "wire_id": "WIRE-DEMO-3",
+      "amount": 3200.0,
+      "received_on": "2026-05-06",
+      "memo": "PAYMENT INV-2005 ZENITH",
+      "sender_name": "ZENITH INDUSTRIES",
+      "status": "auto_matched",
+      "match": {
+        "invoice_ids": "INV-2005",
+        "outcome": "auto_posted",
+        "confidence": 1.0
+      }
+    }
+  ]
+}

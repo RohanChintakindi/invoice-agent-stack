@@ -46,8 +46,8 @@ invoice-agent-stack/
 - [x] Browser orchestration CLI demo
 - [x] Cash recon: synth + features + ranker + bundler + ER + service + server
 - [x] Cash recon CLI demo
-- [ ] Ops dashboard
-- [ ] Unified demo
+- [x] Ops dashboard: FastAPI aggregator + Next.js / Tailwind frontend
+- [x] Unified demo + Vercel snapshot deploy
 
 ## Setup
 
@@ -119,6 +119,51 @@ Pipeline: `wire -> entity resolution -> candidates -> XGBoost+isotonic
 ranker -> auto-post or queue review -> trust events`. Auto-match
 threshold is **trust-aware**: low-trust payers require ~0.97
 calibrated probability, high-trust payers ~0.88.
+
+## Running the unified ops dashboard
+
+The dashboard is a Next.js 14 + Tailwind frontend backed by a FastAPI
+JSON aggregator that reads the same SQLite DB as all three verticals.
+
+```bash
+# 1. seed activity across all 3 verticals so there's something to show
+uv run python -m scripts.seed_unified_demo
+
+# 2. (optional) regenerate the static JSON snapshot used for Vercel
+uv run python -m scripts.export_dashboard_snapshot
+
+# 3. local dev (FastAPI on :8765, Next on :3000):
+uv run python -m scripts.run_dashboard
+
+# 4. or run the Next app standalone in snapshot mode (no Python needed)
+cd ops_dashboard/web && npm install && npm run dev
+# open http://localhost:3000
+```
+
+The dashboard renders a per-payer trust evolution chart with each
+trust event marked by vertical (gold = voice, blue-grey = browser,
+green = recon), an activity stream fusing calls + scrape jobs +
+wire matches, and drill-down panels for each vertical.
+
+## Deploying the dashboard to Vercel
+
+The Vercel deployment serves the bundled JSON snapshot — no Python
+backend is needed at the edge.
+
+```bash
+# refresh the snapshot before each deploy
+uv run python -m scripts.seed_unified_demo
+uv run python -m scripts.export_dashboard_snapshot
+
+# deploy from the web app subdirectory
+cd ops_dashboard/web
+vercel login    # one-time, opens a browser
+vercel --prod   # answers default to most prompts
+```
+
+Or connect the GitHub repo via the Vercel web UI with **root
+directory** set to `ops_dashboard/web` — Vercel will auto-detect Next.js
+and build straight from the snapshot in `public/snapshot/`.
 
 ## Tests
 

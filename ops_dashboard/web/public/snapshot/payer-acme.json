@@ -1,0 +1,124 @@
+{
+  "payer_id": "acme",
+  "name": "Acme Corp",
+  "trust_score": 0.42,
+  "auto_match_threshold": 0.946,
+  "aliases": [
+    "ACME CORP",
+    "ACME CORPORATION",
+    "ACME CRP"
+  ],
+  "kpis": {
+    "calls": 3,
+    "promises_kept": 0,
+    "promises_broken": 1,
+    "browser_jobs": 1,
+    "silent_fails": 0,
+    "wires_auto_matched": 2,
+    "wires_under_review": 0
+  },
+  "calls": [
+    {
+      "id": 3,
+      "occurred_at": "2026-05-07T19:31:36.824134+00:00",
+      "summary": "Reached Karen. She promised payment by Friday for INV-2001.",
+      "outcome": "promise_made",
+      "duration_sec": null,
+      "contact_name": "Karen",
+      "invoice_id": null,
+      "final_phase": null,
+      "final_tone": null
+    },
+    {
+      "id": 2,
+      "occurred_at": "2026-05-07T19:31:36.817656+00:00",
+      "summary": "Follow-up. Karen said the AP system was down all morning.",
+      "outcome": "callback_requested",
+      "duration_sec": null,
+      "contact_name": "Karen",
+      "invoice_id": null,
+      "final_phase": null,
+      "final_tone": null
+    },
+    {
+      "id": 1,
+      "occurred_at": "2026-05-07T19:31:36.809566+00:00",
+      "summary": "Initial outreach. Karen confirmed receipt and said it's in approvals.",
+      "outcome": "partial_promise",
+      "duration_sec": null,
+      "contact_name": "Karen",
+      "invoice_id": null,
+      "final_phase": null,
+      "final_tone": null
+    }
+  ],
+  "promises": [
+    {
+      "id": 1,
+      "promised_date": "2026-04-29T19:31:36.829650+00:00",
+      "promised_amount": 12000.0,
+      "invoice_id": "INV-2001",
+      "kept": false
+    }
+  ],
+  "objections": [
+    {
+      "kind": "approvals_delay",
+      "text": "AP system was reported down briefly.",
+      "occurred_at": "2026-05-07T19:31:36.855575+00:00"
+    },
+    {
+      "kind": "approvals_delay",
+      "text": "Stuck in AP approvals queue.",
+      "occurred_at": "2026-05-07T19:31:36.845364+00:00"
+    }
+  ],
+  "jobs": [
+    {
+      "id": 1,
+      "portal_id": "acme_portal",
+      "action": "extract_invoices",
+      "status": "succeeded",
+      "attempts": 1,
+      "enqueued_at": "2026-05-07T19:31:36.916295+00:00",
+      "finished_at": "2026-05-07T19:31:36.940104+00:00",
+      "last_error": null
+    }
+  ],
+  "extractions": [
+    {
+      "id": 1,
+      "portal_id": "acme_portal",
+      "invoice_count": 2,
+      "extracted_at": "2026-05-07T19:31:36.941205+00:00"
+    }
+  ],
+  "wires": [
+    {
+      "wire_id": "WIRE-DEMO-1",
+      "amount": 12000.0,
+      "received_on": "2026-05-07",
+      "memo": "PAYMENT INV-2001 ACME CORP",
+      "sender_name": "ACME CORP",
+      "status": "auto_matched",
+      "match": {
+        "invoice_ids": "INV-2001",
+        "outcome": "auto_posted",
+        "confidence": 1.0
+      }
+    },
+    {
+      "wire_id": "WIRE-DEMO-2",
+      "amount": 2250.0,
+      "received_on": "2026-05-07",
+      "memo": "PARTIAL INV-2002 ACME",
+      "sender_name": "ACME CORP",
+      "status": "auto_matched",
+      "match": {
+        "invoice_ids": "INV-2002",
+        "outcome": "auto_posted",
+        "confidence": 1.0
+      }
+    }
+  ]
+}

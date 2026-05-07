@@ -1,0 +1,46 @@
+{
+  "payer_id": "zenith",
+  "since_days": 30,
+  "events": [
+    {
+      "ts": "2026-05-07T19:31:37.110082+00:00",
+      "vertical": "recon",
+      "kind": "recon.auto_matched",
+      "summary": "Wire auto-matched (+0.01)",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-3"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.983983+00:00",
+      "vertical": "recon",
+      "kind": "wire.auto_matched",
+      "summary": "$3200.00 from ZENITH INDUSTRIES \u2014 PAYMENT INV-2005 ZENITH",
+      "delta": null,
+      "source": "wire#WIRE-DEMO-3"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.959696+00:00",
+      "vertical": "browser",
+      "kind": "browser.silent_fail_caught",
+      "summary": "Silent failure caught (-0.03)",
+      "delta": -0.03,
+      "source": "browser.job_2"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.958696+00:00",
+      "vertical": "browser",
+      "kind": "job.silent_fail",
+      "summary": "extract_invoices on zenith_portal \u2014 extract_invoices returned no rows",
+      "delta": null,
+      "source": "job#2"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.863796+00:00",
+      "vertical": "voice",
+      "kind": "call.promise_made",
+      "summary": "Cold call. Recipient said wire goes out tomorrow morning.",
+      "delta": null,
+      "source": "call#4"
+    }
+  ]
+}

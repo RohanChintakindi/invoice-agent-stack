@@ -1,0 +1,29 @@
+{
+  "count": 3,
+  "payers": [
+    {
+      "payer_id": "acme",
+      "name": "Acme Corp",
+      "trust_score": 0.42,
+      "auto_match_threshold": 0.946,
+      "last_event_at": "2026-05-07T19:31:37.071075+00:00",
+      "last_event_type": "recon.auto_matched"
+    },
+    {
+      "payer_id": "zenith",
+      "name": "Zenith Industries",
+      "trust_score": 0.48,
+      "auto_match_threshold": 0.934,
+      "last_event_at": "2026-05-07T19:31:37.110082+00:00",
+      "last_event_type": "recon.auto_matched"
+    },
+    {
+      "payer_id": "globex",
+      "name": "Globex LLC",
+      "trust_score": 0.5,
+      "auto_match_threshold": 0.93,
+      "last_event_at": null,
+      "last_event_type": null
+    }
+  ]
+}

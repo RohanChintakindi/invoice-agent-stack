@@ -1,0 +1,24 @@
+{
+  "payer_id": "globex",
+  "name": "Globex LLC",
+  "trust_score": 0.5,
+  "auto_match_threshold": 0.93,
+  "aliases": [
+    "GLOBEX LLC"
+  ],
+  "kpis": {
+    "calls": 0,
+    "promises_kept": 0,
+    "promises_broken": 0,
+    "browser_jobs": 0,
+    "silent_fails": 0,
+    "wires_auto_matched": 0,
+    "wires_under_review": 0
+  },
+  "calls": [],
+  "promises": [],
+  "objections": [],
+  "jobs": [],
+  "extractions": [],
+  "wires": []
+}

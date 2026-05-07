@@ -1,0 +1,39 @@
+{
+  "payer_id": "acme",
+  "since_days": 60,
+  "points": [
+    {
+      "ts": "2026-03-08T19:35:39.870337+00:00",
+      "score": 0.5,
+      "kind": "baseline",
+      "delta": 0.0
+    },
+    {
+      "ts": "2026-05-07T19:31:36.874592+00:00",
+      "score": 0.4,
+      "kind": "payment.promise_broken",
+      "delta": -0.1,
+      "source": "seed_unified.acme.broken"
+    },
+    {
+      "ts": "2026-05-07T19:31:37.033620+00:00",
+      "score": 0.41,
+      "kind": "recon.auto_matched",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-1"
+    },
+    {
+      "ts": "2026-05-07T19:31:37.071075+00:00",
+      "score": 0.42,
+      "kind": "recon.auto_matched",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-2"
+    },
+    {
+      "ts": "2026-05-07T19:35:39.872958+00:00",
+      "score": 0.42,
+      "kind": "now",
+      "delta": 0.0
+    }
+  ]
+}

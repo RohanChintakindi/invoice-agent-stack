@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0b0b0e;
+  color: #e8e4da;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-feature-settings: "ss01", "ss02", "cv11";
+}
+
+/* Subtle film-grain noise overlay so the dark background reads as
+   paper, not a flat fill. Implemented as an SVG turbulence baked in. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='1' seed='3'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.7;
+  mix-blend-mode: overlay;
+  z-index: 1;
+}
+
+/* Hairline rule used as section separator throughout the dashboard. */
+.rule {
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(232, 228, 218, 0.18) 24%,
+    rgba(232, 228, 218, 0.18) 76%,
+    transparent
+  );
+}
+
+/* Tabular numerals everywhere we print a number. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum", "ss01";
+}
+
+/* Custom scrollbar to match the palette. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #26262e;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a45;
+}
+
+/* Recharts default text -> parchment muted. */
+.recharts-cartesian-axis text {
+  fill: #787581 !important;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.recharts-tooltip-wrapper {
+  outline: none;
+}

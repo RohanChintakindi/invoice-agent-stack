@@ -1,0 +1,78 @@
+{
+  "payer_id": "acme",
+  "since_days": 30,
+  "events": [
+    {
+      "ts": "2026-05-07T19:31:37.071075+00:00",
+      "vertical": "recon",
+      "kind": "recon.auto_matched",
+      "summary": "Wire auto-matched (+0.01)",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-2"
+    },
+    {
+      "ts": "2026-05-07T19:31:37.033620+00:00",
+      "vertical": "recon",
+      "kind": "recon.auto_matched",
+      "summary": "Wire auto-matched (+0.01)",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-1"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.983983+00:00",
+      "vertical": "recon",
+      "kind": "wire.auto_matched",
+      "summary": "$12000.00 from ACME CORP \u2014 PAYMENT INV-2001 ACME CORP",
+      "delta": null,
+      "source": "wire#WIRE-DEMO-1"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.983983+00:00",
+      "vertical": "recon",
+      "kind": "wire.auto_matched",
+      "summary": "$2250.00 from ACME CORP \u2014 PARTIAL INV-2002 ACME",
+      "delta": null,
+      "source": "wire#WIRE-DEMO-2"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.940104+00:00",
+      "vertical": "browser",
+      "kind": "job.succeeded",
+      "summary": "extract_invoices on acme_portal",
+      "delta": null,
+      "source": "job#1"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.874592+00:00",
+      "vertical": "voice",
+      "kind": "payment.promise_broken",
+      "summary": "Promise broken (-0.10)",
+      "delta": -0.1,
+      "source": "seed_unified.acme.broken"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.824134+00:00",
+      "vertical": "voice",
+      "kind": "call.promise_made",
+      "summary": "Reached Karen. She promised payment by Friday for INV-2001.",
+      "delta": null,
+      "source": "call#3"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.817656+00:00",
+      "vertical": "voice",
+      "kind": "call.callback_requested",
+      "summary": "Follow-up. Karen said the AP system was down all morning.",
+      "delta": null,
+      "source": "call#2"
+    },
+    {
+      "ts": "2026-05-07T19:31:36.809566+00:00",
+      "vertical": "voice",
+      "kind": "call.partial_promise",
+      "summary": "Initial outreach. Karen confirmed receipt and said it's in approvals.",
+      "delta": null,
+      "source": "call#1"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "payer_id": "zenith",
+  "since_days": 60,
+  "points": [
+    {
+      "ts": "2026-03-08T19:35:39.893270+00:00",
+      "score": 0.5,
+      "kind": "baseline",
+      "delta": 0.0
+    },
+    {
+      "ts": "2026-05-07T19:31:36.959696+00:00",
+      "score": 0.47,
+      "kind": "browser.silent_fail_caught",
+      "delta": -0.03,
+      "source": "browser.job_2"
+    },
+    {
+      "ts": "2026-05-07T19:31:37.110082+00:00",
+      "score": 0.48,
+      "kind": "recon.auto_matched",
+      "delta": 0.01,
+      "source": "recon.auto_match.WIRE-DEMO-3"
+    },
+    {
+      "ts": "2026-05-07T19:35:39.894269+00:00",
+      "score": 0.48,
+      "kind": "now",
+      "delta": 0.0
+    }
+  ]
+}
