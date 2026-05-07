@@ -61,9 +61,9 @@ def main() -> int:
         invs = list(s.exec(select(Invoice)))
         reset = 0
         for inv in invs:
-            if inv.status != InvoiceStatus.OPEN:
+            if inv.status != InvoiceStatus.OPEN or inv.amount_paid > 0:
                 inv.status = InvoiceStatus.OPEN
-                inv.paid_at = None
+                inv.amount_paid = 0.0
                 s.add(inv)
                 reset += 1
         counts["Invoice (reset to OPEN)"] = reset
