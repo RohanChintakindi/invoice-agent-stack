@@ -112,15 +112,27 @@ def _enqueue_jobs(engine) -> list[int]:
     return job_ids
 
 
-def _trust_events_since(engine, since: datetime) -> list[TrustEventRecord]:
+def _trust_events_since(engine, since: datetime) -> list[dict]:
+    """Return primitive snapshots so the caller can print them after the
+    session closes. Reading TrustEventRecord attributes outside the session
+    raises sqlalchemy.orm.exc.DetachedInstanceError."""
     with session_scope(engine) as s:
-        return list(
+        rows = list(
             s.exec(
                 select(TrustEventRecord)
                 .where(TrustEventRecord.occurred_at >= since)
                 .order_by(TrustEventRecord.occurred_at)
             )
         )
+        return [
+            {
+                "payer_id": r.payer_id,
+                "event_type": r.event_type.value,
+                "delta": r.delta,
+                "source": r.source or "",
+            }
+            for r in rows
+        ]
 
 
 def main() -> int:
@@ -194,7 +206,10 @@ def main() -> int:
     if not events:
         print("  (none — loop did not fire any trust events)")
     for ev in events:
-        print(f"  - {ev.payer_id:8s}  {ev.event_type.value:30s}  delta={ev.delta:+.2f}  source={ev.source}")
+        print(
+            f"  - {ev['payer_id']:8s}  {ev['event_type']:30s}  "
+            f"delta={ev['delta']:+.2f}  source={ev['source']}"
+        )
     print()
 
     return 0
