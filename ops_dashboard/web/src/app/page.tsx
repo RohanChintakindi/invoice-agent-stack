@@ -1,9 +1,11 @@
 import { Brand } from "@/components/Brand";
+import { BrowserScrapeButton } from "@/components/BrowserScrapeButton";
 import { DrillDown } from "@/components/DrillDown";
 import { EventStream } from "@/components/EventStream";
 import { KPIStrip } from "@/components/KPIStrip";
 import { PayerHeader } from "@/components/PayerHeader";
 import { PayerRail } from "@/components/PayerRail";
+import { TalkButton } from "@/components/TalkButton";
 import { TrustChart } from "@/components/TrustChart";
 import { api } from "@/lib/api";
 
@@ -63,6 +65,23 @@ export default async function Page({ searchParams }: PageProps) {
 
         <div className="flex flex-col gap-6 lg:col-span-9">
           <PayerHeader detail={detail} />
+
+          <div className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-ink-500/70 bg-ink-700/40 px-5 py-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-parchment-400">
+                Live demo triggers
+              </div>
+              <div className="mt-1 font-mono text-[10px] tracking-wide text-parchment-500">
+                Drive the live verticals against {detail.name} from the dashboard.
+                Both fire real backends; outcomes appear in the timeline.
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <BrowserScrapeButton payerId={detail.payer_id} />
+              <TalkButton payerId={detail.payer_id} payerName={detail.name} />
+            </div>
+          </div>
+
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <TrustChart
