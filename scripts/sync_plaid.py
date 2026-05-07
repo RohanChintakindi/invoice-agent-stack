@@ -169,20 +169,156 @@ def _get_access_token(client: plaid_api.PlaidApi) -> str:
     return access_token
 
 
-# Synthetic incoming wires we inject into the Plaid sandbox so the demo has
-# data that actually maps to our payer fixtures and seeded invoices.
-# Negative `amount` follows Plaid's convention (positive = outflow / debit,
-# negative = inflow / credit). Amounts and descriptions are tuned so entity
-# resolution maps to acme/zenith/globex AND the amounts exactly match the
-# invoices seeded by scripts/seed_unified_demo.py — so the ranker should
-# auto-match all five.
-DEMO_INJECTIONS: list[dict] = [
-    {"amount": -12000.00, "description": "WIRE FROM ACME CORP - INV-2001",   "days_ago": 1},
-    {"amount":  -4500.00, "description": "ACME CORP PAYMENT INV-2002",       "days_ago": 2},
-    {"amount":  -9000.00, "description": "ZENITH INDUSTRIES INV-2004",       "days_ago": 1},
-    {"amount":  -3200.00, "description": "ZENITH INDUSTRIES INV-2005",       "days_ago": 1},
-    {"amount":  -1800.00, "description": "GLOBEX LLC PAYMENT INV-2006",      "days_ago": 2},
+# --- Realistic wire distribution generator -----------------------------------
+#
+# Replaces the previous hand-rigged 5-injection list. Mirrors the 60/15/10/10/5
+# distribution from cash_recon/synth.py so the Plaid sync produces a *real*
+# mix of recon outcomes:
+#
+#     60%  single   — clean exact match against an open invoice
+#     15%  bundle   — one wire pays 2-3 invoices for the same payer
+#     10%  partial  — wire amount is ~70% of invoice (typical short-pay)
+#     10%  noisy    — typo'd payer name, no invoice id in memo
+#      5%  decoy    — money from a sender we don't have invoices for
+#
+# Result: some auto_match, some under_review, some unmatched. The ranker has
+# to actually discriminate, the trust-aware threshold has to actually fire,
+# and the demo tells an honest "this is what production looks like" story.
+#
+# The invoice list mirrors scripts/seed_unified_demo.py (kept in sync manually
+# — both files cite each other in comments). If you add invoices to the seed,
+# add them here too.
+
+_SEED_INVOICES: list[tuple[str, str, float]] = [
+    # (invoice_id, payer_id, amount)
+    ("INV-2001", "acme",   12000.0),
+    ("INV-2002", "acme",    4500.0),
+    ("INV-2003", "acme",    7500.0),
+    ("INV-2004", "zenith",  9000.0),
+    ("INV-2005", "zenith",  3200.0),
+    ("INV-2006", "globex",  1800.0),
+    ("INV-2007", "acme",    8200.0),
+    ("INV-2008", "acme",   15500.0),
+    ("INV-2009", "acme",    2400.0),
+    ("INV-2010", "zenith",  6750.0),
+    ("INV-2011", "zenith", 11250.0),
+    ("INV-2012", "zenith",  4800.0),
+    ("INV-2013", "zenith", 14200.0),
+    ("INV-2014", "globex",  3500.0),
+    ("INV-2015", "globex",  9750.0),
+    ("INV-2016", "globex",  5600.0),
+    ("INV-2017", "globex", 22000.0),
+    ("INV-2018", "acme",   18900.0),
 ]
+
+# Aliases that resolve to a payer via cash_recon.entity_resolution. Lifted
+# from cash_recon/synth.py:PAYER_FIXTURES so wires exercise the same alias
+# table the seed configures.
+_PAYER_ALIASES: dict[str, list[str]] = {
+    "acme":   ["ACME CORP", "ACME CORPORATION", "Acme C.", "ACME CRP"],
+    "zenith": ["ZENITH INDUSTRIES", "Zenith Ind.", "ZENITHIND"],
+    "globex": ["GLOBEX LLC", "Globex L.L.C.", "GLOBEXLLC"],
+}
+
+_DECOY_NAMES: list[str] = [
+    "UNKNOWN VENDOR", "REFUND DEPT", "MISC PAYMENT",
+    "INTRST PYMNT", "SQUARE INC", "STRIPE TRANSFER",
+]
+
+
+def _typo(s: str, rng) -> str:
+    """Drop one char or swap two adjacent — same noise model as synth.py."""
+    if len(s) < 4:
+        return s
+    if rng.random() < 0.5:
+        i = rng.randrange(len(s))
+        return s[:i] + s[i + 1:]
+    i = rng.randrange(len(s) - 1)
+    return s[:i] + s[i + 1] + s[i] + s[i + 2:]
+
+
+def _generate_demo_wires(seed: int = 42, n_wires: int = 18) -> list[dict]:
+    """Produce a Plaid-shaped wire list with the same distribution
+    cash_recon/synth.py uses for ranker training. Deterministic for a given
+    seed so re-running the script gives the same demo data.
+    """
+    import random
+
+    rng = random.Random(seed)
+
+    by_payer: dict[str, list[tuple[str, float]]] = {}
+    for inv_id, payer_id, amount in _SEED_INVOICES:
+        by_payer.setdefault(payer_id, []).append((inv_id, amount))
+
+    wires: list[dict] = []
+    for _ in range(n_wires):
+        roll = rng.random()
+        days_ago = rng.randint(0, 5)
+
+        if roll < 0.60:
+            # Clean single-invoice payment.
+            payer_id = rng.choice(list(by_payer.keys()))
+            inv_id, amount = rng.choice(by_payer[payer_id])
+            sender = rng.choice(_PAYER_ALIASES[payer_id])
+            wires.append({
+                "amount": -round(amount, 2),
+                "description": f"PAYMENT {inv_id} {sender}",
+                "days_ago": days_ago,
+            })
+        elif roll < 0.75:
+            # Bundle: 2-3 invoices, same payer, summed.
+            payer_id = rng.choice(list(by_payer.keys()))
+            if len(by_payer[payer_id]) < 2:
+                continue
+            k = min(len(by_payer[payer_id]), rng.choice([2, 3]))
+            chosen = rng.sample(by_payer[payer_id], k)
+            sender = rng.choice(_PAYER_ALIASES[payer_id])
+            total = round(sum(a for _, a in chosen), 2)
+            wires.append({
+                "amount": -total,
+                "description": f"BULK PMT {sender}",
+                "days_ago": days_ago,
+            })
+        elif roll < 0.85:
+            # Partial: paid ~70% (typical short-pay scenario).
+            payer_id = rng.choice(list(by_payer.keys()))
+            inv_id, amount = rng.choice(by_payer[payer_id])
+            sender = rng.choice(_PAYER_ALIASES[payer_id])
+            partial = round(amount * rng.uniform(0.6, 0.8), 2)
+            wires.append({
+                "amount": -partial,
+                "description": f"PARTIAL PMT {inv_id} {sender}",
+                "days_ago": days_ago,
+            })
+        elif roll < 0.95:
+            # Noisy: typo'd sender name, no invoice id in memo.
+            payer_id = rng.choice(list(by_payer.keys()))
+            _, amount = rng.choice(by_payer[payer_id])
+            sender = _typo(rng.choice(_PAYER_ALIASES[payer_id]), rng)
+            wires.append({
+                "amount": -round(amount, 2),
+                "description": f"WIRE FROM {sender}",
+                "days_ago": days_ago,
+            })
+        else:
+            # Decoy: not a payer we know; should land as unmatched.
+            decoy = rng.choice(_DECOY_NAMES)
+            amount = round(rng.uniform(150, 8000), 2)
+            wires.append({
+                "amount": -amount,
+                "description": f"INCOMING {decoy}",
+                "days_ago": days_ago,
+            })
+
+    return wires
+
+
+# Module-level so the user_custom payload builder can reference it. Generated
+# once at import time — deterministic via the seed. seed=1 / n=22 hits every
+# bucket of the realistic distribution at least once, which gives the demo
+# every recon outcome we want to showcase (auto_match, bundle, partial-pay,
+# fuzzy-match, decoy-unmatched).
+DEMO_INJECTIONS: list[dict] = _generate_demo_wires(seed=1, n_wires=22)
 
 
 def _inject_demo_transactions(

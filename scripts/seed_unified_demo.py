@@ -129,19 +129,38 @@ def _seed_voice(engine) -> None:
 
 
 def _seed_invoices(engine) -> None:
+    """Idempotent per-row — safe to re-run against an existing DB. New
+    invoices added to this list will be seeded on next run; existing rows
+    are left alone (so already-paid invoices keep their paid status)."""
+    today = date.today()
+    rows = [
+        # Original demo set.
+        ("INV-2001", "acme", 12000.0, 6),
+        ("INV-2002", "acme", 4500.0, 1),
+        ("INV-2003", "acme", 7500.0, -2),
+        ("INV-2004", "zenith", 9000.0, 12),
+        ("INV-2005", "zenith", 3200.0, 0),
+        ("INV-2006", "globex", 1800.0, 3),
+        # Extended set — gives the Plaid sync realistic headroom for varied
+        # auto/review/unmatched outcomes when the synthetic distribution
+        # generator hits these. Mirror in scripts/sync_plaid._SEED_INVOICES.
+        ("INV-2007", "acme", 8200.0, -1),
+        ("INV-2008", "acme", 15500.0, 4),
+        ("INV-2009", "acme", 2400.0, 0),
+        ("INV-2010", "zenith", 6750.0, 8),
+        ("INV-2011", "zenith", 11250.0, -3),
+        ("INV-2012", "zenith", 4800.0, 2),
+        ("INV-2013", "zenith", 14200.0, 15),
+        ("INV-2014", "globex", 3500.0, 5),
+        ("INV-2015", "globex", 9750.0, -1),
+        ("INV-2016", "globex", 5600.0, 7),
+        ("INV-2017", "globex", 22000.0, 11),
+        ("INV-2018", "acme", 18900.0, 9),
+    ]
     with session_scope(engine) as s:
-        if s.get(Invoice, "INV-2001"):
-            return
-        today = date.today()
-        rows = [
-            ("INV-2001", "acme", 12000.0, 6),
-            ("INV-2002", "acme", 4500.0, 1),
-            ("INV-2003", "acme", 7500.0, -2),
-            ("INV-2004", "zenith", 9000.0, 12),
-            ("INV-2005", "zenith", 3200.0, 0),
-            ("INV-2006", "globex", 1800.0, 3),
-        ]
         for inv_id, payer_id, amount, days_overdue in rows:
+            if s.get(Invoice, inv_id) is not None:
+                continue
             due = today - timedelta(days=days_overdue)
             issued = due - timedelta(days=30)
             s.add(
