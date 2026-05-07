@@ -44,7 +44,8 @@ invoice-agent-stack/
 - [x] Voice agent CLI replay driver
 - [x] Browser orchestration: queue, vault, validator, worker, server
 - [x] Browser orchestration CLI demo
-- [ ] Cash recon (vertical 3)
+- [x] Cash recon: synth + features + ranker + bundler + ER + service + server
+- [x] Cash recon CLI demo
 - [ ] Ops dashboard
 - [ ] Unified demo
 
@@ -96,6 +97,28 @@ The demo shows the cross-vertical story end-to-end: the voice agent's
 `PROMISE_BROKEN` event and the browser layer's `SILENT_FAIL_CAUGHT`
 event both write into the same per-payer trust score, which then
 drives the next scrape interval.
+
+## Running the cash reconciliation demo
+
+```bash
+# (Optional) seed acme so the trust score reflects voice agent history.
+uv run python -m scripts.seed_demo
+
+# Seed open invoices + payer aliases for cash_recon.
+uv run python -m scripts.seed_recon
+
+# Train ranker (first run only, ~1s) + ingest 4 representative wires:
+# clean / partial / bundle / decoy. Shows the trust-aware threshold.
+uv run python -m scripts.cash_recon_demo
+
+# FastAPI server (POST /wires, GET /reviews, etc.)
+uv run uvicorn cash_recon.server:app --reload
+```
+
+Pipeline: `wire -> entity resolution -> candidates -> XGBoost+isotonic
+ranker -> auto-post or queue review -> trust events`. Auto-match
+threshold is **trust-aware**: low-trust payers require ~0.97
+calibrated probability, high-trust payers ~0.88.
 
 ## Tests
 

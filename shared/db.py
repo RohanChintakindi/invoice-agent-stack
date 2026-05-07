@@ -25,6 +25,7 @@ def init_schema(engine) -> None:
     """Create all tables. Imports models so SQLModel knows about them."""
     # Local imports avoid circular references at module load.
     from browser_orchestration import models as _bo_models  # noqa: F401
+    from cash_recon import models as _cr_models  # noqa: F401
     from shared import models  # noqa: F401
     from voice_agent import memory_models  # noqa: F401
 

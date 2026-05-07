@@ -9,6 +9,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 # Importing the model modules registers them with SQLModel.metadata.
 import browser_orchestration.models  # noqa: F401
+import cash_recon.models  # noqa: F401
 import shared.models  # noqa: F401
 import voice_agent.memory_models  # noqa: F401
 
