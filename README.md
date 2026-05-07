@@ -35,13 +35,15 @@ invoice-agent-stack/
 ## Status
 
 - [x] Repo scaffold
-- [ ] Voice agent L3: state machine
-- [ ] Voice agent L4: memory
-- [ ] Trust engine stub
-- [ ] Voice agent L2: orchestrator + Vapi
-- [ ] Voice agent L5: compliance
-- [ ] Browser orchestration
-- [ ] Cash recon
+- [x] Voice agent L3: state machine
+- [x] Voice agent L4: memory
+- [x] Trust engine
+- [x] Voice agent L5: compliance filter
+- [x] Voice agent prompts + signal classifier
+- [x] Voice agent L2: LangGraph orchestrator + FastAPI/Vapi server
+- [x] Voice agent CLI replay driver
+- [ ] Browser orchestration (vertical 2)
+- [ ] Cash recon (vertical 3)
 - [ ] Ops dashboard
 - [ ] Unified demo
 
@@ -50,4 +52,26 @@ invoice-agent-stack/
 ```bash
 uv sync
 cp .env.example .env  # fill in ANTHROPIC_API_KEY, VAPI_API_KEY
+```
+
+## Running the voice agent
+
+```bash
+# Seed the demo payer (Acme Corp with realistic call history)
+uv run python -m scripts.seed_demo
+
+# Text-mode REPL (no Vapi needed, uses Anthropic for the LLM)
+uv run python -m scripts.voice_repl --payer acme --invoice INV-1023 --days-overdue 28
+
+# Or with the FakeLLMClient (no API key required, deterministic)
+uv run python -m scripts.voice_repl --fake-llm
+
+# FastAPI server (Vapi-compatible /v1/chat/completions)
+uv run uvicorn voice_agent.server:app --reload
+```
+
+## Tests
+
+```bash
+uv run pytest -q
 ```
