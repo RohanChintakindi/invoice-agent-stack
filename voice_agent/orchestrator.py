@@ -34,13 +34,14 @@ The graph state is a flat TypedDict so it's easy to inspect mid-call
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from voice_agent.compliance import (
     CONSISTENCY_PROMPT,
+    ComplianceResult,
     Verdict,
     combine,
     parse_consistency_response,
@@ -61,6 +62,208 @@ from voice_agent.state_machine import (
     initial_state,
     transition_intra_call,
 )
+
+
+# ---- Canned branch responses ------------------------------------------------
+# Used by the dispute / callback / handoff branches when we don't want the LLM
+# to free-form. Streaming path emits these as a single SSE chunk.
+
+CANNED_DISPUTE = (
+    "Thank you for flagging that. I want to make sure we resolve any "
+    "discrepancy before anything else. Could you tell me what's "
+    "incorrect — the amount, the invoice itself, or whether it's "
+    "already been paid? I'll loop in someone to investigate and email "
+    "you a summary today."
+)
+
+CANNED_CALLBACK = (
+    "Of course — what's a good time for me to follow up with them "
+    "directly? I'll send you a quick email confirming what we discussed "
+    "so they have it in writing before our next call."
+)
+
+CANNED_HANDOFF = (
+    "I appreciate you sharing that, and I don't want to add stress to a "
+    "difficult situation. Let me have one of our specialists reach out "
+    "directly to discuss next steps that work for you. Is email or "
+    "phone better for that conversation?"
+)
+
+COMPLIANCE_FALLBACK = (
+    "Thanks for taking the call. I'd like to put you in touch with one "
+    "of our specialists who can walk through next steps. Could I get "
+    "an email address to send a follow-up?"
+)
+
+CANNED_BY_BRANCH = {
+    "dispute": CANNED_DISPUTE,
+    "callback": CANNED_CALLBACK,
+    "handoff": CANNED_HANDOFF,
+}
+
+
+# ---- Pure stages (callable from both graph and streaming path) --------------
+
+
+# Hard signals deterministically resolved by regex — fast (microseconds) and
+# safe to run on the latency-critical path. Soft sentiment requires an LLM
+# call and is the slowest part of pre-response (~300-500ms with Haiku); the
+# streaming path defers it to a background task.
+
+_HARD_TERMINAL = (
+    IntraCallSignal.BANKRUPTCY_MENTIONED,
+    IntraCallSignal.DISPUTE_MENTIONED,
+    IntraCallSignal.MANAGER_REQUESTED,
+    IntraCallSignal.PAYMENT_COMMITTED,
+)
+
+
+def classify_hard_signals(user_message: str) -> list[IntraCallSignal]:
+    """Sync, regex-only signal extraction. ~1ms. Used by both paths."""
+    hard = classify_hard_signal(user_message)
+    return [hard] if hard is not None else []
+
+
+def classify_soft_signal(
+    llm: LLMClient, user_message: str, hard_signals: list[IntraCallSignal]
+) -> IntraCallSignal | None:
+    """LLM sentiment classifier. Skipped when a hard signal already commits
+    the call to a specific branch (those branches don't need soft tone)."""
+    if any(h in _HARD_TERMINAL for h in hard_signals):
+        return None
+    raw = llm.complete(
+        system="You classify caller sentiment for a collections agent.",
+        user=SENTIMENT_PROMPT.format(text=user_message),
+        max_tokens=100,
+    )
+    sentiment = parse_sentiment_response(raw)
+    soft = sentiment_to_signal(sentiment)
+    if soft is not None and soft not in hard_signals:
+        return soft
+    return None
+
+
+def classify_signals(llm: LLMClient, user_message: str) -> list[IntraCallSignal]:
+    """Combined hard + soft classification — used by the non-streaming graph."""
+    hard = classify_hard_signals(user_message)
+    soft = classify_soft_signal(llm, user_message, hard)
+    return hard + ([soft] if soft is not None else [])
+
+
+def apply_signals(
+    call_state: State,
+    signals: list[IntraCallSignal],
+    transition_log: list[str] | None = None,
+) -> tuple[State, list[str]]:
+    current = call_state
+    log = list(transition_log or [])
+    for signal in signals:
+        nxt = transition_intra_call(current, signal)
+        log.append(
+            f"{signal.value}: ({current.phase.value}, {current.tone.value}) → "
+            f"({nxt.phase.value}, {nxt.tone.value}) — {nxt.reason}"
+        )
+        current = nxt
+    return current, log
+
+
+def decide_branch(signals: list[IntraCallSignal]) -> str:
+    if IntraCallSignal.BANKRUPTCY_MENTIONED in signals:
+        return "handoff"
+    if IntraCallSignal.DISPUTE_MENTIONED in signals:
+        return "dispute"
+    if IntraCallSignal.MANAGER_REQUESTED in signals:
+        return "callback"
+    return "respond"
+
+
+def check_compliance(llm: LLMClient, text: str) -> ComplianceResult:
+    """Two-pass compliance: regex screen, then LLM consistency check.
+
+    Skips the LLM call when regex already says BLOCK (regex is precise on
+    threats; LLM is for subtler issues that regex misses).
+    """
+    regex_result = regex_screen(text)
+    if regex_result.verdict == Verdict.BLOCK:
+        return regex_result
+    raw = llm.complete(
+        system="You are a compliance reviewer for collections-call output.",
+        user=CONSISTENCY_PROMPT.format(text=text),
+        max_tokens=80,
+    )
+    llm_result = parse_consistency_response(raw)
+    return combine(regex_result, llm_result)
+
+
+@dataclass
+class PreResponseResult:
+    detected_signals: list[IntraCallSignal]
+    call_state: State
+    transition_log: list[str]
+    branch_action: str
+
+
+def run_pre_response(
+    llm: LLMClient,
+    *,
+    payer_context: PayerContext,
+    call_state: State | None,
+    user_message: str,
+    transition_log: list[str] | None = None,
+) -> PreResponseResult:
+    """Stage 1: classify signals, apply transitions, decide branch.
+
+    Synchronous and small (one LLM call for sentiment classification when
+    no hard signal triggers). Used by the graph and the streaming server
+    path so signal handling stays consistent across both."""
+    starting_state = call_state or initial_state(payer_context)
+    signals = classify_signals(llm, user_message)
+    new_state, log = apply_signals(starting_state, signals, transition_log)
+    branch = decide_branch(signals)
+    return PreResponseResult(
+        detected_signals=signals,
+        call_state=new_state,
+        transition_log=log,
+        branch_action=branch,
+    )
+
+
+def run_pre_response_fast(
+    *,
+    payer_context: PayerContext,
+    call_state: State | None,
+    user_message: str,
+    transition_log: list[str] | None = None,
+) -> PreResponseResult:
+    """Latency-critical version of run_pre_response.
+
+    Skips the soft-sentiment LLM call (~300-500ms) — hard signals alone
+    decide the branch, since soft sentiment only ever affects state
+    transitions, not branch routing. The caller is expected to schedule
+    `classify_soft_signal` as a background task whose result mutates
+    state for the *next* turn. Cuts pre-response work from ~500ms to
+    ~1ms on the hot path."""
+    starting_state = call_state or initial_state(payer_context)
+    signals = classify_hard_signals(user_message)
+    new_state, log = apply_signals(starting_state, signals, transition_log)
+    branch = decide_branch(signals)
+    return PreResponseResult(
+        detected_signals=signals,
+        call_state=new_state,
+        transition_log=log,
+        branch_action=branch,
+    )
+
+
+def run_post_response(llm: LLMClient, text: str) -> ComplianceResult:
+    """Stage 3: compliance review of an outgoing utterance.
+
+    In the non-streaming path this can BLOCK and trigger a retry. In the
+    streaming path tokens have already shipped, so the verdict is
+    observed-and-logged only — used to flag turns in the debug panel and
+    to condition the next turn's system prompt.
+    """
+    return check_compliance(llm, text)
 
 
 # ---- Workflow state ---------------------------------------------------------
@@ -98,60 +301,21 @@ MAX_RETRIES = 1
 
 def make_classify_signals(llm: LLMClient):
     def node(state: WorkflowState) -> dict:
-        text = state["user_message"]
-        signals: list[IntraCallSignal] = []
-
-        hard = classify_hard_signal(text)
-        if hard is not None:
-            signals.append(hard)
-
-        # Soft sentiment via LLM. Skip if a hard signal already commits us.
-        if hard not in (
-            IntraCallSignal.BANKRUPTCY_MENTIONED,
-            IntraCallSignal.DISPUTE_MENTIONED,
-            IntraCallSignal.MANAGER_REQUESTED,
-            IntraCallSignal.PAYMENT_COMMITTED,
-        ):
-            raw = llm.complete(
-                system="You classify caller sentiment for a collections agent.",
-                user=SENTIMENT_PROMPT.format(text=text),
-                max_tokens=100,
-            )
-            sentiment = parse_sentiment_response(raw)
-            soft = sentiment_to_signal(sentiment)
-            if soft is not None and soft != hard:
-                signals.append(soft)
-
-        return {"detected_signals": signals}
+        return {"detected_signals": classify_signals(llm, state["user_message"])}
 
     return node
 
 
 def apply_transitions_node(state: WorkflowState) -> dict:
-    current = state.get("call_state") or initial_state(state["payer_context"])
-    log = list(state.get("transition_log", []))
-
-    for signal in state.get("detected_signals", []):
-        nxt = transition_intra_call(current, signal)
-        log.append(
-            f"{signal.value}: ({current.phase.value}, {current.tone.value}) → "
-            f"({nxt.phase.value}, {nxt.tone.value}) — {nxt.reason}"
-        )
-        current = nxt
-
-    return {"call_state": current, "transition_log": log}
+    starting = state.get("call_state") or initial_state(state["payer_context"])
+    new_state, log = apply_signals(
+        starting, state.get("detected_signals", []), state.get("transition_log", [])
+    )
+    return {"call_state": new_state, "transition_log": log}
 
 
 def route_branch_node(state: WorkflowState) -> dict:
-    signals = state.get("detected_signals", [])
-    branch = "respond"
-    if IntraCallSignal.BANKRUPTCY_MENTIONED in signals:
-        branch = "handoff"
-    elif IntraCallSignal.DISPUTE_MENTIONED in signals:
-        branch = "dispute"
-    elif IntraCallSignal.MANAGER_REQUESTED in signals:
-        branch = "callback"
-    return {"branch_action": branch}
+    return {"branch_action": decide_branch(state.get("detected_signals", []))}
 
 
 def make_respond(llm: LLMClient):
@@ -180,58 +344,23 @@ def make_respond(llm: LLMClient):
 
 
 def dispute_handler_node(state: WorkflowState) -> dict:
-    text = (
-        "Thank you for flagging that. I want to make sure we resolve any "
-        "discrepancy before anything else. Could you tell me what's "
-        "incorrect — the amount, the invoice itself, or whether it's "
-        "already been paid? I'll loop in someone to investigate and email "
-        "you a summary today."
-    )
-    return {"draft_response": text}
+    return {"draft_response": CANNED_DISPUTE}
 
 
 def callback_handler_node(state: WorkflowState) -> dict:
-    text = (
-        "Of course — what's a good time for me to follow up with them "
-        "directly? I'll send you a quick email confirming what we discussed "
-        "so they have it in writing before our next call."
-    )
-    return {"draft_response": text}
+    return {"draft_response": CANNED_CALLBACK}
 
 
 def handoff_handler_node(state: WorkflowState) -> dict:
-    text = (
-        "I appreciate you sharing that, and I don't want to add stress to a "
-        "difficult situation. Let me have one of our specialists reach out "
-        "directly to discuss next steps that work for you. Is email or "
-        "phone better for that conversation?"
-    )
-    return {"draft_response": text}
+    return {"draft_response": CANNED_HANDOFF}
 
 
 def make_compliance_check(llm: LLMClient):
     def node(state: WorkflowState) -> dict:
-        text = state["draft_response"]
-        regex_result = regex_screen(text)
-
-        # Skip the LLM check if the regex pass already says block — the regex
-        # is precise enough on threats; LLM is for subtler issues.
-        if regex_result.verdict == Verdict.BLOCK:
-            return {
-                "compliance_verdict": regex_result.verdict.value,
-                "compliance_rationale": regex_result.rationale,
-            }
-
-        raw = llm.complete(
-            system="You are a compliance reviewer for collections-call output.",
-            user=CONSISTENCY_PROMPT.format(text=text),
-            max_tokens=80,
-        )
-        llm_result = parse_consistency_response(raw)
-        merged = combine(regex_result, llm_result)
+        result = check_compliance(llm, state["draft_response"])
         return {
-            "compliance_verdict": merged.verdict.value,
-            "compliance_rationale": merged.rationale,
+            "compliance_verdict": result.verdict.value,
+            "compliance_rationale": result.rationale,
         }
 
     return node
@@ -239,15 +368,7 @@ def make_compliance_check(llm: LLMClient):
 
 def finalize_node(state: WorkflowState) -> dict:
     verdict = state.get("compliance_verdict", Verdict.PASS.value)
-    if verdict == Verdict.BLOCK.value:
-        # Last-ditch safe canned response; orchestrator-level fallback.
-        text = (
-            "Thanks for taking the call. I'd like to put you in touch with one "
-            "of our specialists who can walk through next steps. Could I get "
-            "an email address to send a follow-up?"
-        )
-    else:
-        text = state["draft_response"]
+    text = COMPLIANCE_FALLBACK if verdict == Verdict.BLOCK.value else state["draft_response"]
     return {"final_response": text}
 
 

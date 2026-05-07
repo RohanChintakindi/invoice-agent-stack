@@ -21,7 +21,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
+import time as _time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,14 +32,26 @@ load_dotenv()
 import plaid
 from plaid.api import plaid_api
 from plaid.model.country_code import CountryCode
+from plaid.model.custom_sandbox_transaction import CustomSandboxTransaction
 from plaid.model.item_public_token_exchange_request import (
     ItemPublicTokenExchangeRequest,
 )
 from plaid.model.products import Products
+from plaid.model.sandbox_item_fire_webhook_request import (
+    SandboxItemFireWebhookRequest,
+)
 from plaid.model.sandbox_public_token_create_request import (
     SandboxPublicTokenCreateRequest,
 )
+from plaid.model.sandbox_public_token_create_request_options import (
+    SandboxPublicTokenCreateRequestOptions,
+)
+from plaid.model.sandbox_transactions_create_request import (
+    SandboxTransactionsCreateRequest,
+)
+from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
+from plaid.model.webhook_type import WebhookType
 
 from cash_recon import service as recon_service
 from cash_recon.models import WireTransfer
@@ -51,6 +64,15 @@ SANDBOX_INSTITUTION_ID = "ins_109508"
 
 # Persist the access_token so re-running doesn't churn fake Items.
 TOKEN_CACHE = Path(__file__).resolve().parent.parent / ".plaid_sandbox.json"
+
+# Webhook URL Plaid will hit when DEFAULT_UPDATE fires. Required for
+# sandbox_transactions_create injections to actually surface in
+# transactions_sync — Plaid sandbox holds custom transactions until a
+# webhook flow completes. The endpoint just needs to return 200.
+PLAID_WEBHOOK_URL = os.getenv(
+    "PLAID_WEBHOOK_URL",
+    "https://invoice-agent-stack-rohan.fly.dev/recon/webhooks/plaid",
+)
 
 
 def _client() -> plaid_api.PlaidApi:
@@ -70,14 +92,68 @@ def _client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(plaid.ApiClient(cfg))
 
 
-def _get_access_token(client: plaid_api.PlaidApi) -> str:
+def _load_cache() -> dict:
     if TOKEN_CACHE.exists():
-        cached = json.loads(TOKEN_CACHE.read_text())
-        return cached["access_token"]
+        return json.loads(TOKEN_CACHE.read_text())
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    TOKEN_CACHE.write_text(json.dumps(cache, indent=2))
+
+
+def _build_user_custom_payload() -> str:
+    """JSON payload Plaid's `user_custom` sandbox accepts. Defines a single
+    checking account preloaded with payer-matched transactions. Unlike
+    sandbox_transactions_create (which requires a webhook lifecycle to
+    surface custom data), user_custom transactions are baked into the
+    item at creation — they show up in transactions_sync immediately.
+    """
+    today = date.today()
+    return json.dumps(
+        {
+            "override_accounts": [
+                {
+                    "type": "depository",
+                    "subtype": "checking",
+                    "starting_balance": 250000.00,
+                    "meta": {
+                        "name": "Iridium Operating Account",
+                        "official_name": "Iridium AR Sweep — Checking",
+                    },
+                    "transactions": [
+                        {
+                            "amount": row["amount"],
+                            "description": row["description"],
+                            "date_transacted": (
+                                today - timedelta(days=row["days_ago"])
+                            ).isoformat(),
+                            "date_posted": (
+                                today - timedelta(days=row["days_ago"] - 1)
+                            ).isoformat(),
+                            "currency": "USD",
+                        }
+                        for row in DEMO_INJECTIONS
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _get_access_token(client: plaid_api.PlaidApi) -> str:
+    cache = _load_cache()
+    if cache.get("access_token"):
+        return cache["access_token"]
 
     pub_req = SandboxPublicTokenCreateRequest(
         institution_id=SANDBOX_INSTITUTION_ID,
         initial_products=[Products("transactions")],
+        options=SandboxPublicTokenCreateRequestOptions(
+            webhook=PLAID_WEBHOOK_URL,
+            override_username="user_custom",
+            override_password=_build_user_custom_payload(),
+        ),
     )
     pub = client.sandbox_public_token_create(pub_req)
     public_token = pub["public_token"]
@@ -86,9 +162,76 @@ def _get_access_token(client: plaid_api.PlaidApi) -> str:
     exch = client.item_public_token_exchange(exch_req)
     access_token = exch["access_token"]
 
-    TOKEN_CACHE.write_text(json.dumps({"access_token": access_token}, indent=2))
+    # user_custom items already contain our injected transactions, so flag
+    # them as injected to skip the legacy sandbox_transactions_create path.
+    _save_cache({"access_token": access_token, "injected": True})
     print(f"[plaid] cached new sandbox access_token to {TOKEN_CACHE.name}")
     return access_token
+
+
+# Synthetic incoming wires we inject into the Plaid sandbox so the demo has
+# data that actually maps to our payer fixtures and seeded invoices.
+# Negative `amount` follows Plaid's convention (positive = outflow / debit,
+# negative = inflow / credit). Amounts and descriptions are tuned so entity
+# resolution maps to acme/zenith/globex AND the amounts exactly match the
+# invoices seeded by scripts/seed_unified_demo.py — so the ranker should
+# auto-match all five.
+DEMO_INJECTIONS: list[dict] = [
+    {"amount": -12000.00, "description": "WIRE FROM ACME CORP - INV-2001",   "days_ago": 1},
+    {"amount":  -4500.00, "description": "ACME CORP PAYMENT INV-2002",       "days_ago": 2},
+    {"amount":  -9000.00, "description": "ZENITH INDUSTRIES INV-2004",       "days_ago": 1},
+    {"amount":  -3200.00, "description": "ZENITH INDUSTRIES INV-2005",       "days_ago": 1},
+    {"amount":  -1800.00, "description": "GLOBEX LLC PAYMENT INV-2006",      "days_ago": 2},
+]
+
+
+def _inject_demo_transactions(
+    client: plaid_api.PlaidApi, access_token: str
+) -> int:
+    """Inject deterministic payer-matched transactions into the sandbox
+    item. Plaid's response only carries request_id (the actual transactions
+    populate asynchronously via DEFAULT_UPDATE webhook), so we return the
+    count we requested rather than parsing the response. The caller is
+    expected to poll transactions_sync afterwards until the new rows land.
+    """
+    today = date.today()
+    txs = [
+        CustomSandboxTransaction(
+            date_transacted=today - timedelta(days=row["days_ago"]),
+            date_posted=today - timedelta(days=row["days_ago"] - 1),
+            amount=row["amount"],
+            description=row["description"],
+            iso_currency_code="USD",
+        )
+        for row in DEMO_INJECTIONS
+    ]
+    req = SandboxTransactionsCreateRequest(
+        access_token=access_token,
+        transactions=txs,
+    )
+    client.sandbox_transactions_create(req)
+
+    # The injected transactions sit in limbo until a DEFAULT_UPDATE webhook
+    # is delivered. Fire it manually so sandbox processes them — Plaid will
+    # POST to PLAID_WEBHOOK_URL (handled by /recon/webhooks/plaid) and then
+    # surface the transactions in the next transactions_sync call.
+    fire_req = SandboxItemFireWebhookRequest(
+        access_token=access_token,
+        webhook_type=WebhookType("TRANSACTIONS"),
+        webhook_code="DEFAULT_UPDATE",
+    )
+    client.sandbox_item_fire_webhook(fire_req)
+
+    # transactions_refresh as a belt-and-suspenders pass — also forces
+    # Plaid's transaction enrichment pipeline.
+    try:
+        client.transactions_refresh(
+            TransactionsRefreshRequest(access_token=access_token)
+        )
+    except plaid.ApiException:
+        pass
+
+    return len(txs)
 
 
 def _pull_transactions(client: plaid_api.PlaidApi, access_token: str) -> list[dict]:
@@ -138,10 +281,57 @@ def main() -> int:
 
     client = _client()
     access_token = _get_access_token(client)
-    transactions = _pull_transactions(client, access_token)
-    print(f"[plaid] pulled {len(transactions)} transactions from sandbox")
+    cache = _load_cache()
+
+    # Inject payer-matched transactions exactly once per access_token (tracked
+    # in the cache file). Skipping the conditional `if not incoming` because
+    # Plaid sandbox already preloads stock merchants like United Airlines —
+    # they don't help us demo cash recon against our payer fixtures.
+    if not cache.get("injected"):
+        injected = _inject_demo_transactions(client, access_token)
+        print(f"[plaid] injected {injected} payer-matched transactions; "
+              f"waiting for Plaid to process them (DEFAULT_UPDATE webhook)...")
+        cache["injected"] = True
+        _save_cache(cache)
+
+        # Plaid processes injected sandbox transactions asynchronously. We
+        # match by amount — Plaid normalizes the description but amount
+        # round-trips exactly. Up to 60 seconds of polling.
+        target_amounts = {round(row["amount"], 2) for row in DEMO_INJECTIONS}
+        for attempt in range(1, 21):
+            _time.sleep(3)
+            transactions = _pull_transactions(client, access_token)
+            seen_amounts = {round(float(tx["amount"]), 2) for tx in transactions}
+            matches = target_amounts & seen_amounts
+            print(
+                f"[plaid]   attempt {attempt} ({attempt * 3}s): "
+                f"{len(matches)}/{len(target_amounts)} injected amounts visible"
+            )
+            if len(matches) >= len(target_amounts):
+                break
+    else:
+        # user_custom items have transactions baked in at creation, but the
+        # initial sync can still take a few seconds on the Plaid side. Poll
+        # briefly until our injected amounts show up.
+        target_amounts = {round(row["amount"], 2) for row in DEMO_INJECTIONS}
+        transactions = []
+        for attempt in range(1, 11):
+            transactions = _pull_transactions(client, access_token)
+            seen = {round(float(tx["amount"]), 2) for tx in transactions}
+            matches = target_amounts & seen
+            if matches:
+                print(
+                    f"[plaid]   attempt {attempt} ({attempt * 2}s): "
+                    f"{len(matches)}/{len(target_amounts)} injected amounts visible"
+                )
+                if len(matches) >= len(target_amounts):
+                    break
+            else:
+                print(f"[plaid]   attempt {attempt} ({attempt * 2}s): waiting for sync to surface injected txs...")
+            _time.sleep(2)
 
     incoming = [tx for tx in transactions if float(tx["amount"]) < 0]
+    print(f"[plaid] pulled {len(transactions)} transactions from sandbox")
     print(f"[plaid] {len(incoming)} are incoming credits (cash inflows)")
 
     engine = make_engine()

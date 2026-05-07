@@ -30,6 +30,9 @@ class CallSession:
     call_state: State
     transition_log: list[str] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
+    # Most recent async compliance verdict for the assistant utterance the
+    # caller just heard. None until the streaming path runs once.
+    last_compliance: dict | None = None
 
 
 class SessionStore:

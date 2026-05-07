@@ -116,6 +116,20 @@ def create_app(*, ranker: TrainedRanker | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.post("/webhooks/plaid")
+    def plaid_webhook(payload: dict) -> dict:
+        """Plaid posts here whenever an item event fires (DEFAULT_UPDATE,
+        HISTORICAL_UPDATE, ITEM_ERROR, etc). For sandbox we don't need to
+        act on the body — we just need a 200 OK so Plaid considers the
+        webhook delivered, which unblocks `sandbox_transactions_create`
+        items from sitting in limbo. In production this would dispatch
+        to the sync queue."""
+        return {
+            "received": True,
+            "type": payload.get("webhook_type"),
+            "code": payload.get("webhook_code"),
+        }
+
     @app.post("/wires", response_model=IngestWireResponse)
     def ingest(req: IngestWireRequest) -> IngestWireResponse:
         wire = WireTransfer(

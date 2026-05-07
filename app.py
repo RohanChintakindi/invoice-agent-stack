@@ -47,6 +47,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from browser_orchestration.server import create_app as create_browser_app
 from cash_recon.server import create_app as create_recon_app
+from demo_portal.server import create_app as create_portal_app
 from ops_dashboard.api import create_app as create_ops_app
 from voice_agent.server import app as voice_app  # module-level FastAPI instance
 
@@ -54,8 +55,9 @@ from voice_agent.server import app as voice_app  # module-level FastAPI instance
 browser_app = create_browser_app()
 recon_app = create_recon_app()
 ops_app = create_ops_app()
+portal_app = create_portal_app()
 
-_subapps = (voice_app, browser_app, recon_app, ops_app)
+_subapps = (voice_app, browser_app, recon_app, ops_app, portal_app)
 
 
 @asynccontextmanager
@@ -93,6 +95,7 @@ def root() -> dict[str, str]:
         "browser_orchestration": "/browser/health",
         "cash_recon": "/recon/health",
         "ops_api": "/ops/health",
+        "demo_portal": "/portal/",
     }
 
 
@@ -105,3 +108,4 @@ main.mount("/voice", voice_app)
 main.mount("/browser", browser_app)
 main.mount("/recon", recon_app)
 main.mount("/ops", ops_app)
+main.mount("/portal", portal_app)

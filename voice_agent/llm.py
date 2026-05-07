@@ -8,12 +8,15 @@ calls or flakiness.
 from __future__ import annotations
 
 import os
-from typing import Protocol
+from typing import AsyncIterator, Protocol
 
 
 class LLMClient(Protocol):
     def chat(self, system: str, messages: list[dict], max_tokens: int = 500) -> str: ...
     def complete(self, system: str, user: str, max_tokens: int = 200) -> str: ...
+    def astream_chat(
+        self, system: str, messages: list[dict], max_tokens: int = 500
+    ) -> AsyncIterator[str]: ...
 
 
 class AnthropicClient:
@@ -23,7 +26,16 @@ class AnthropicClient:
         import anthropic
 
         self.model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-        self.client = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.client = anthropic.Anthropic(api_key=self._api_key)
+        self._async_client = None  # lazy: only build when streaming is used
+
+    def _get_async_client(self):
+        if self._async_client is None:
+            import anthropic
+
+            self._async_client = anthropic.AsyncAnthropic(api_key=self._api_key)
+        return self._async_client
 
     def chat(self, system: str, messages: list[dict], max_tokens: int = 500) -> str:
         response = self.client.messages.create(
@@ -37,6 +49,20 @@ class AnthropicClient:
 
     def complete(self, system: str, user: str, max_tokens: int = 200) -> str:
         return self.chat(system, [{"role": "user", "content": user}], max_tokens)
+
+    async def astream_chat(
+        self, system: str, messages: list[dict], max_tokens: int = 500
+    ) -> AsyncIterator[str]:
+        client = self._get_async_client()
+        async with client.messages.stream(
+            model=self.model,
+            system=system,
+            messages=messages,
+            max_tokens=max_tokens,
+        ) as stream:
+            async for text in stream.text_stream:
+                if text:
+                    yield text
 
 
 class FakeLLMClient:
@@ -68,3 +94,14 @@ class FakeLLMClient:
         if self._complete_responses:
             return self._complete_responses.pop(0)
         return self.default_complete
+
+    async def astream_chat(
+        self, system: str, messages: list[dict], max_tokens: int = 500
+    ) -> AsyncIterator[str]:
+        # Same routing as chat() so tests can script streaming responses.
+        self.chat_calls.append({"system": system, "messages": messages})
+        text = self._chat_responses.pop(0) if self._chat_responses else self.default_chat
+        # Yield word-sized fragments so iteration is observable in tests.
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            yield word + (" " if i < len(words) - 1 else "")

@@ -26,6 +26,8 @@ are three ways to set it (checked in order):
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 import time
@@ -37,15 +39,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from shared.db import init_schema, make_engine, session_scope
 from shared.models import Payer
 from shared.trust_engine import TrustEngine
+from voice_agent.compliance import Verdict
 from voice_agent.llm import AnthropicClient, FakeLLMClient, LLMClient
 from voice_agent.memory import PayerMemory
-from voice_agent.orchestrator import build_graph, run_turn
+from voice_agent.orchestrator import (
+    CANNED_BY_BRANCH,
+    COMPLIANCE_FALLBACK,
+    apply_signals,
+    build_graph,
+    classify_soft_signal,
+    run_post_response,
+    run_pre_response,
+    run_pre_response_fast,
+    run_turn,
+)
+from voice_agent.prompts import render_system_prompt
 from voice_agent.session import CallSession, SessionStore
 from voice_agent.state_machine import PayerContext, State, initial_state
 
@@ -188,8 +203,8 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse:
+@app.post("/v1/chat/completions")
+async def chat_completions(req: ChatCompletionRequest):
     payer_id = extract_payer_id(req)
     if not payer_id:
         raise HTTPException(
@@ -222,6 +237,9 @@ async def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse
             history=messages_to_history(req.messages),
         )
         sessions.put(session)
+
+    if req.stream:
+        return await _streaming_chat(req, sessions, session, user_message)
 
     graph = app.state.graph
     result = run_turn(
@@ -266,6 +284,168 @@ async def chat_completions(req: ChatCompletionRequest) -> ChatCompletionResponse
         ],
         debug=debug,
     )
+
+
+async def _streaming_chat(
+    req: ChatCompletionRequest,
+    sessions: SessionStore,
+    session: CallSession,
+    user_message: str,
+) -> StreamingResponse:
+    """SSE streaming path used when the caller (Vapi) sets stream=true.
+
+    Same three-stage pipeline as the non-streaming path, but the response
+    generation step streams Anthropic deltas directly into SSE chunks.
+    Compliance runs post-stream as observation only (tokens already shipped
+    to TTS — see run_post_response docstring).
+    """
+    llm: LLMClient = app.state.llm
+
+    # Latency-critical path: hard-signal classification only (~1ms) so we can
+    # start streaming Anthropic immediately. Soft sentiment runs as a
+    # background task (see _async_soft_sentiment) — its state transitions
+    # apply to the next turn instead of blocking this one.
+    pre = run_pre_response_fast(
+        payer_context=session.payer_context,
+        call_state=session.call_state,
+        user_message=user_message,
+        transition_log=session.transition_log,
+    )
+
+    stream_system: str | None = None
+    stream_history: list[dict] | None = None
+    canned_text: str | None = None
+    if pre.branch_action == "respond":
+        stream_system = render_system_prompt(
+            state=pre.call_state,
+            memory_summary=session.memory_summary,
+            invoice_facts=session.invoice_facts,
+        )
+        stream_history = list(session.history) + [
+            {"role": "user", "content": user_message}
+        ]
+    else:
+        canned_text = CANNED_BY_BRANCH[pre.branch_action]
+
+    completion_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
+    model_name = req.model
+
+    def chunk(delta: dict, finish_reason: str | None = None) -> str:
+        payload = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_name,
+            "choices": [
+                {"index": 0, "delta": delta, "finish_reason": finish_reason}
+            ],
+        }
+        return f"data: {json.dumps(payload)}\n\n"
+
+    async def sse_gen():
+        full_text = ""
+        try:
+            yield chunk({"role": "assistant"})
+            if canned_text is not None:
+                full_text = canned_text
+                yield chunk({"content": canned_text})
+            else:
+                async for delta in llm.astream_chat(
+                    system=stream_system, messages=stream_history, max_tokens=300
+                ):
+                    full_text += delta
+                    yield chunk({"content": delta})
+        finally:
+            yield chunk({}, finish_reason="stop")
+            yield "data: [DONE]\n\n"
+
+            # Fast session updates first — the next turn may arrive immediately
+            # and needs the new state machine + history.
+            session.call_state = pre.call_state
+            session.transition_log = pre.transition_log
+            new_history = list(session.history)
+            new_history.append({"role": "user", "content": user_message})
+            new_history.append({"role": "assistant", "content": full_text})
+            session.history = new_history
+            session.last_compliance = {
+                "verdict": "pending",
+                "rationale": "",
+                "branch": pre.branch_action,
+                "text": full_text,
+            }
+            sessions.put(session)
+
+            # Compliance as an async guardrail. Tokens have already shipped;
+            # we don't block the stream on the verdict. The background task
+            # updates session.last_compliance when it lands, so the next-turn
+            # system prompt and the debug panel can both see it.
+            if full_text:
+                asyncio.create_task(
+                    _async_compliance(llm, sessions, session, full_text, pre.branch_action)
+                )
+
+            # Soft sentiment also runs in the background, since we skipped it
+            # on the hot path. Its state transitions apply to the *next* turn.
+            asyncio.create_task(
+                _async_soft_sentiment(
+                    llm, sessions, session, user_message, pre.detected_signals
+                )
+            )
+
+    return StreamingResponse(sse_gen(), media_type="text/event-stream")
+
+
+async def _async_compliance(
+    llm: LLMClient,
+    sessions: SessionStore,
+    session: CallSession,
+    text: str,
+    branch: str,
+) -> None:
+    """Background guardrail. Runs compliance off the event loop (the LLM
+    consistency call is sync) and stores the verdict back on the session.
+    Never raises — failures degrade to a logged error verdict."""
+    try:
+        result = await asyncio.to_thread(run_post_response, llm, text)
+        verdict = result.verdict.value
+        rationale = result.rationale
+    except Exception as exc:
+        verdict = "error"
+        rationale = f"compliance check raised: {exc}"
+    session.last_compliance = {
+        "verdict": verdict,
+        "rationale": rationale,
+        "branch": branch,
+        "text": text,
+    }
+    sessions.put(session)
+
+
+async def _async_soft_sentiment(
+    llm: LLMClient,
+    sessions: SessionStore,
+    session: CallSession,
+    user_message: str,
+    hard_signals: list,
+) -> None:
+    """Background sentiment classifier. The streaming path skipped the
+    soft-sentiment LLM call to start speaking sooner; this picks it up
+    afterward and folds the resulting state transition into the session
+    so the *next* turn's system prompt sees the updated phase/tone.
+    Never raises."""
+    try:
+        soft = await asyncio.to_thread(
+            classify_soft_signal, llm, user_message, hard_signals
+        )
+    except Exception:
+        return
+    if soft is None:
+        return
+    new_state, new_log = apply_signals(session.call_state, [soft], session.transition_log)
+    session.call_state = new_state
+    session.transition_log = new_log
+    sessions.put(session)
 
 
 @app.post("/webhooks/vapi")

@@ -1,46 +1,40 @@
-# fly.toml for the unified invoice-agent-stack deployment.
+# fly.toml app configuration file generated for invoice-agent-stack-rohan on 2026-05-07T16:09:42-04:00
 #
-# After first deploy, set secrets:
-#   fly secrets set ANTHROPIC_API_KEY=sk-ant-... \
-#                   ANTHROPIC_MODEL=claude-haiku-4-5-20251001 \
-#                   VAPI_API_KEY=... \
-#                   PLAID_CLIENT_ID=... \
-#                   PLAID_SECRET=... \
-#                   PLAID_ENV=sandbox \
-#                   VAULT_KEY=$(uv run python -c "from browser_orchestration.vault import generate_key; print(generate_key())")
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "invoice-agent-stack"
-primary_region = "iad"   # closest to most US users; change if needed.
+app = 'invoice-agent-stack-rohan'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "8000"
-  # SQLite lives on the persistent volume (mounted at /data).
-  DB_URL = "sqlite:////data/invoice_stack.db"
+  DB_URL = 'sqlite:////data/invoice_stack.db'
+  PORT = '8000'
 
 [[mounts]]
-  source = "iridium_data"
-  destination = "/data"
-  initial_size = "1gb"
+  source = 'iridium_data'
+  destination = '/data'
+  initial_size = '1gb'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
   [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
-    method = "GET"
-    timeout = "5s"
-    path = "/healthz"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/healthz'
 
 [[vm]]
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
-  memory = "512mb"
+  memory_mb = 512
