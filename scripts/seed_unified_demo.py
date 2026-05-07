@@ -1,7 +1,12 @@
-"""Seed enough activity across all 3 verticals so the ops dashboard
-has a rich story to render.
+"""Seed structural data only — payers, aliases, invoices, portals, vault,
+and the trained recon ranker. No synthetic events, calls, jobs, or wires.
 
-Idempotent: running twice is safe (uses get-or-skip pattern).
+The ops dashboard timeline starts empty; live demo runs (scrape button,
+talk button, sync_plaid, etc.) populate it organically. This is the
+"truth-only" mode for interview demos where every event a viewer sees
+came from a real backend run, not seed_unified_demo.
+
+Idempotent: running twice is safe (per-row get-or-skip).
 
 Run:
     uv run python -m scripts.seed_unified_demo
@@ -9,7 +14,7 @@ Run:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,24 +23,12 @@ load_dotenv()
 
 from sqlmodel import select
 
-from browser_orchestration.harness_adapter import (
-    MockHarness,
-    script_clean_extraction,
-    script_silent_fail,
-)
-from browser_orchestration.models import JobAction, Portal
-from browser_orchestration.queue import SqliteJobQueue
+from browser_orchestration.models import Portal
 from browser_orchestration.vault import CredentialVault, generate_key
-from browser_orchestration.worker import process_one_job
-from cash_recon import service as recon_service
-from cash_recon.models import Invoice, InvoiceStatus, PayerAlias, WireTransfer
+from cash_recon.models import Invoice, InvoiceStatus, PayerAlias
 from cash_recon.ranker import DEFAULT_ARTIFACT_DIR, load, train
 from shared.db import init_schema, make_engine, session_scope
-from shared.models import Payer, TrustEventType
-from shared.trust_engine import TrustEngine
-from voice_agent.llm import FakeLLMClient
-from voice_agent.memory import PayerMemory
-from voice_agent.memory_models import CallOutcome
+from shared.models import Payer
 
 
 PAYERS = [
@@ -44,9 +37,19 @@ PAYERS = [
     ("globex", "Globex LLC"),
 ]
 
+import os
+
+# Default to the live demo_portal URLs on Fly so the browser-use adapter
+# (when run locally against this DB) hits a real, scrapeable target.
+# Override with PORTAL_BASE if you point at a different host.
+_PORTAL_BASE = os.getenv(
+    "PORTAL_BASE", "https://invoice-agent-stack-rohan.fly.dev/portal"
+)
+
 PORTALS = [
-    ("acme_portal", "Acme AP Portal", "https://acme.example/billing"),
-    ("zenith_portal", "Zenith Vendor Portal", "https://zenith.example/portal"),
+    ("acme_portal",   "Acme AP Portal",       f"{_PORTAL_BASE}/acme_portal/",   "acme"),
+    ("zenith_portal", "Zenith Vendor Portal", f"{_PORTAL_BASE}/zenith_portal/", "zenith"),
+    ("globex_portal", "Globex Billing Portal", f"{_PORTAL_BASE}/globex_portal/", "globex"),
 ]
 
 ALIASES = [
@@ -69,63 +72,10 @@ def _seed_payers_and_aliases(session) -> None:
             session.add(PayerAlias(alias=alias, payer_id=payer_id))
 
 
-def _seed_voice(engine) -> None:
-    """Voice agent activity: call history, promises, objections."""
-    with session_scope(engine) as s:
-        mem = PayerMemory(s)
-        if not mem.get_contacts("acme"):
-            mem.add_contact("acme", "Karen", role="AP", preferred_time="mornings")
-            mem.add_contact("acme", "Bob", role="Karen's manager")
-        if not mem.recent_calls("acme"):
-            mem.record_call(
-                payer_id="acme",
-                summary="Initial outreach. Karen confirmed receipt and said it's in approvals.",
-                outcome=CallOutcome.PARTIAL_PROMISE,
-                contact_name="Karen",
-            )
-            mem.record_call(
-                payer_id="acme",
-                summary="Follow-up. Karen said the AP system was down all morning.",
-                outcome=CallOutcome.CALLBACK_REQUESTED,
-                contact_name="Karen",
-            )
-            mem.record_call(
-                payer_id="acme",
-                summary="Reached Karen. She promised payment by Friday for INV-2001.",
-                outcome=CallOutcome.PROMISE_MADE,
-                contact_name="Karen",
-            )
-            promised_date = datetime.now(timezone.utc) - timedelta(days=8)
-            promise = mem.record_promise(
-                payer_id="acme",
-                promised_date=promised_date,
-                promised_amount=12000,
-                invoice_id="INV-2001",
-            )
-            mem.resolve_promise(promise.id, kept=False)
-
-            mem.record_objection("acme", "approvals_delay",
-                                 "Stuck in AP approvals queue.")
-            mem.record_objection("acme", "approvals_delay",
-                                 "AP system was reported down briefly.")
-
-        if not mem.recent_calls("zenith"):
-            mem.record_call(
-                payer_id="zenith",
-                summary="Cold call. Recipient said wire goes out tomorrow morning.",
-                outcome=CallOutcome.PROMISE_MADE,
-                contact_name="Phil",
-            )
-
-        # Trust events that mirror call activity.
-        trust = TrustEngine(s)
-        history = trust.get_history("acme")
-        if not any(e.event_type == TrustEventType.PROMISE_BROKEN for e in history):
-            trust.update_trust("acme", TrustEventType.PROMISE_BROKEN,
-                               source="seed_unified.acme.broken")
-        if not any(e.event_type == TrustEventType.CALL_HOSTILE for e in history):
-            # Add one hostile call event so the timeline shows variety.
-            pass
+# Voice / browser / recon event seeding intentionally removed. The demo now
+# starts with an empty timeline and populates organically when buttons are
+# clicked or scripts (sync_plaid, run_browser_full_loop) run. See git
+# history for the previous seed-events code if you ever want it back.
 
 
 def _seed_invoices(engine) -> None:
@@ -171,93 +121,51 @@ def _seed_invoices(engine) -> None:
             )
 
 
-def _seed_browser(engine) -> None:
-    """Browser orchestration: portal definitions + a few processed jobs."""
-    import os
+def _seed_portals(engine) -> None:
+    """Register the portal records and store demo credentials in the vault.
+    Idempotent — safe to re-run. No jobs enqueued; the timeline stays empty
+    until a real demo run (button click / scripts/run_browser_full_loop)
+    fires."""
     if not os.getenv("VAULT_KEY"):
         os.environ["VAULT_KEY"] = generate_key()
     vault = CredentialVault.from_env()
 
     with session_scope(engine) as s:
-        for portal_id, name, url in PORTALS:
-            if s.get(Portal, portal_id) is None:
+        for portal_id, name, url, payer_id in PORTALS:
+            existing = s.get(Portal, portal_id)
+            if existing is None:
                 s.add(Portal(portal_id=portal_id, name=name, base_url=url))
                 s.flush()
-                vault.store(s, portal_id=portal_id, payer_id="acme" if "acme" in portal_id else "zenith",
-                            username="ap@example", secret="hunter2")
+            elif existing.base_url != url:
+                # Pick up URL drift on re-seed (e.g. moving to live demo_portal).
+                existing.base_url = url
+                s.add(existing)
+                s.flush()
 
-    harness = MockHarness({
-        "acme_portal": script_clean_extraction(
-            invoices=[
-                {"invoice_id": "INV-2001", "amount": 12000.0,
-                 "due_date": "2026-04-01", "status": "open"},
-                {"invoice_id": "INV-2002", "amount": 4500.0,
-                 "due_date": "2026-05-01", "status": "open"},
-            ]
-        ),
-        "zenith_portal": script_silent_fail(),
-    })
-    llm = FakeLLMClient(complete_responses=[
-        "verdict: pass\nconfidence: 0.92\nwhy: clean invoice table\n",
-        "verdict: fail\nconfidence: 0.88\nwhy: page reads 'session expired'\n",
-    ])
-
-    # Skip if we've already processed jobs.
-    from browser_orchestration.models import Job
-    with session_scope(engine) as s:
-        existing_jobs = list(s.exec(select(Job)))
-    if existing_jobs:
-        return
-
-    with session_scope(engine) as s:
-        q = SqliteJobQueue(s)
-        q.enqueue(portal_id="acme_portal", payer_id="acme",
-                  action=JobAction.EXTRACT_INVOICES)
-        q.enqueue(portal_id="zenith_portal", payer_id="zenith",
-                  action=JobAction.EXTRACT_INVOICES)
-
-    for _ in range(2):
-        process_one_job(engine=engine, harness=harness, vault=vault, llm=llm)
+            try:
+                vault.store(
+                    s,
+                    portal_id=portal_id,
+                    payer_id=payer_id,
+                    username="ap@example",
+                    secret="hunter2",
+                )
+            except Exception:
+                # Already stored — vault is idempotent on (portal, payer).
+                pass
 
 
-def _seed_recon(engine) -> None:
+def _seed_recon_ranker() -> None:
+    """Make sure the trained ranker model is on disk; train it on synthetic
+    data if not. No wires are ingested into the DB — the recon timeline
+    starts empty and populates from real Plaid sync runs (or the dashboard
+    Run-scrape button paired with a wire-ingest endpoint) at demo time."""
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR
     if (artifact_dir / "ranker.json").exists():
-        ranker = load(artifact_dir)
-    else:
-        print("[seed] training cash_recon ranker...")
-        ranker = train(seed=42, n_invoices=300, n_wires=300)
-        ranker.save(artifact_dir)
-
-    today = date.today()
-    wires = [
-        WireTransfer(
-            wire_id="WIRE-DEMO-1", amount=12000.0, received_on=today,
-            memo="PAYMENT INV-2001 ACME CORP", sender_name="ACME CORP",
-        ),
-        WireTransfer(
-            wire_id="WIRE-DEMO-2", amount=2250.0, received_on=today,
-            memo="PARTIAL INV-2002 ACME", sender_name="ACME CORP",
-        ),
-        WireTransfer(
-            wire_id="WIRE-DEMO-3", amount=3200.0, received_on=today - timedelta(days=1),
-            memo="PAYMENT INV-2005 ZENITH", sender_name="ZENITH INDUSTRIES",
-        ),
-        WireTransfer(
-            wire_id="WIRE-DEMO-4", amount=575.0, received_on=today,
-            memo="MISC PAYMENT 8812", sender_name="UNKNOWN VENDOR LLC",
-        ),
-    ]
-
-    with session_scope(engine) as s:
-        already = s.get(WireTransfer, "WIRE-DEMO-1")
-    if already is not None:
         return
-
-    for w in wires:
-        with session_scope(engine) as s:
-            trust_engine = TrustEngine(s)
-            recon_service.ingest_wire(s, ranker=ranker, wire=w, trust_engine=trust_engine)
+    print("[seed] training cash_recon ranker on synthetic data...")
+    ranker = train(seed=42, n_invoices=300, n_wires=300)
+    ranker.save(artifact_dir)
 
 
 def main() -> None:
@@ -267,15 +175,19 @@ def main() -> None:
     with session_scope(engine) as s:
         _seed_payers_and_aliases(s)
 
-    _seed_voice(engine)
     _seed_invoices(engine)
-    _seed_browser(engine)
-    _seed_recon(engine)
+    _seed_portals(engine)
+    _seed_recon_ranker()
 
-    print("[seed_unified_demo] OK — dashboard should now show:")
-    print("  voice: 3 calls + 1 broken promise on acme")
-    print("  browser: 1 clean extraction (acme_portal) + 1 silent fail (zenith_portal)")
-    print("  recon: 4 wires (auto / partial / clean / decoy) across 3 payers")
+    print("[seed_unified_demo] OK — structural seed complete:")
+    print(f"  payers   : {len(PAYERS)}")
+    print(f"  aliases  : {len(ALIASES)}")
+    print(f"  invoices : 18 across acme / zenith / globex")
+    print(f"  portals  : {len(PORTALS)} pointing at live demo_portal URLs")
+    print("  ranker   : trained model on disk")
+    print()
+    print("Timeline starts empty. Drive activity with the dashboard")
+    print("buttons or scripts/sync_plaid + scripts/run_browser_full_loop.")
 
 
 if __name__ == "__main__":
