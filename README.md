@@ -42,7 +42,8 @@ invoice-agent-stack/
 - [x] Voice agent prompts + signal classifier
 - [x] Voice agent L2: LangGraph orchestrator + FastAPI/Vapi server
 - [x] Voice agent CLI replay driver
-- [ ] Browser orchestration (vertical 2)
+- [x] Browser orchestration: queue, vault, validator, worker, server
+- [x] Browser orchestration CLI demo
 - [ ] Cash recon (vertical 3)
 - [ ] Ops dashboard
 - [ ] Unified demo
@@ -69,6 +70,32 @@ uv run python -m scripts.voice_repl --fake-llm
 # FastAPI server (Vapi-compatible /v1/chat/completions)
 uv run uvicorn voice_agent.server:app --reload
 ```
+
+## Running the browser orchestration demo
+
+```bash
+# Generate a Fernet key for the credential vault. In prod this comes
+# from a real secrets manager.
+uv run python -c "from browser_orchestration.vault import generate_key; print(generate_key())"
+# Then export it (PowerShell):
+$env:VAULT_KEY = "<paste the key>"
+
+# Seed the demo: payer "acme" + two portals (one happy, one silent-fail)
+uv run python -m scripts.seed_demo
+uv run python -m scripts.seed_portals
+
+# End-to-end demo: enqueues both jobs, runs the worker, prints outcomes
+# and shows how SILENT_FAIL_CAUGHT writes back to the trust score.
+uv run python -m scripts.browser_demo
+
+# FastAPI server (queue + portal health + scrape-interval endpoints)
+uv run uvicorn browser_orchestration.server:app --reload
+```
+
+The demo shows the cross-vertical story end-to-end: the voice agent's
+`PROMISE_BROKEN` event and the browser layer's `SILENT_FAIL_CAUGHT`
+event both write into the same per-payer trust score, which then
+drives the next scrape interval.
 
 ## Tests
 
