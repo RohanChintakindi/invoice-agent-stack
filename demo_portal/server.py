@@ -86,6 +86,10 @@ def _login_page(portal_id: str, error: str | None = None) -> str:
         if error
         else ""
     )
+    # `action="login"` is relative to the current page (e.g. /portal/acme_portal/)
+    # so the form submits to /portal/acme_portal/login regardless of mount prefix.
+    # Absolute paths like /{portal_id}/login break when this sub-app is mounted
+    # under /portal/ on the unified Fly app.
     return f"""<!doctype html>
 <html>
 <head><title>{title} — Sign in</title></head>
@@ -93,7 +97,7 @@ def _login_page(portal_id: str, error: str | None = None) -> str:
   <h1>{title}</h1>
   <p>Sign in to view your accounts-receivable statements.</p>
   {error_block}
-  <form method="post" action="/{portal_id}/login">
+  <form method="post" action="login">
     <p>
       <label>Email<br>
         <input type="email" name="username" required style="width:100%;padding:8px">
@@ -121,12 +125,13 @@ def _invoice_table_page(portal_id: str, invoices: list[dict]) -> str:
         f'</tr>'
         for inv in invoices
     )
+    # Relative href so logout works under any mount prefix.
     return f"""<!doctype html>
 <html>
 <head><title>{title} — Invoices</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto">
   <h1>{title}</h1>
-  <p><a href="/{portal_id}/logout">Sign out</a></p>
+  <p><a href="logout">Sign out</a></p>
   <h2>Open invoices</h2>
   <table id="invoices" border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;width:100%">
     <thead>
@@ -153,7 +158,7 @@ def _session_expired_page(portal_id: str) -> str:
   <h1>{title}</h1>
   <div class="alert" style="background:#fff3cd;border:1px solid #ffeaa7;padding:16px;margin:20px 0">
     <strong>Your session has expired.</strong>
-    Please <a href="/{portal_id}/">sign in again</a> to view your invoices.
+    Please <a href="./">sign in again</a> to view your invoices.
   </div>
 </body>
 </html>"""

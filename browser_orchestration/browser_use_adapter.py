@@ -78,11 +78,20 @@ class BrowserUseAdapter:
         self,
         *,
         model: str | None = None,
+        fallback_model: str | None = None,
         headless: bool = True,
         max_steps: int = 25,
     ) -> None:
+        # Cost-optimized two-model setup: Haiku drives most steps, but
+        # browser-use auto-escalates to the fallback when the primary
+        # model produces output that doesn't satisfy its strict per-step
+        # Pydantic schema. This is the LLM-layer counterpart to the
+        # validator's page-layer self-healing.
         self._model = model or os.getenv(
             "ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"
+        )
+        self._fallback_model = fallback_model or os.getenv(
+            "ANTHROPIC_FALLBACK_MODEL", "claude-sonnet-4-6"
         )
         self._headless = headless
         self._max_steps = max_steps
@@ -107,18 +116,25 @@ class BrowserUseAdapter:
 
         # Lazy imports keep the optional deps optional. Anyone importing
         # this module without the [real-browser] extras would otherwise
-        # fail at import time on a base-image worker.
+        # fail at import time on a base-image worker. We use browser-use's
+        # own ChatAnthropic wrapper (not langchain's) — browser-use needs
+        # a `.provider` attribute that the langchain class doesn't expose.
         from browser_use import Agent  # type: ignore[import-not-found]
-        from langchain_anthropic import ChatAnthropic  # type: ignore[import-not-found]
+        from browser_use.llm.anthropic.chat import (  # type: ignore[import-not-found]
+            ChatAnthropic,
+        )
 
-        llm = ChatAnthropic(
-            model=self._model,
-            anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
-            temperature=0.2,
+        api_key = os.environ["ANTHROPIC_API_KEY"]
+        primary = ChatAnthropic(model=self._model, api_key=api_key, temperature=0.2)
+        fallback = ChatAnthropic(
+            model=self._fallback_model, api_key=api_key, temperature=0.2
         )
         task = self._build_task(request)
-        agent = Agent(task=task, llm=llm, max_steps=self._max_steps)
-        history = await agent.run()
+        # fallback_llm: browser-use auto-escalates to this model when the
+        # primary repeatedly fails Pydantic validation on the per-step
+        # action schema. Self-healing without exhausting the step budget.
+        agent = Agent(task=task, llm=primary, fallback_llm=fallback)
+        history = await agent.run(max_steps=self._max_steps)
         final = history.final_result() if hasattr(history, "final_result") else history
 
         return HarnessResult(
