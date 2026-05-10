@@ -60,12 +60,36 @@ portal_app = create_portal_app()
 _subapps = (voice_app, browser_app, recon_app, ops_app, portal_app)
 
 
+def _seed_if_empty() -> None:
+    """Auto-seed structural data on cold start when the DB is empty.
+
+    Cloud Run scales to zero and uses ephemeral /tmp storage, so each
+    cold-started instance gets a fresh DB. Idempotent on a non-empty DB.
+    """
+    from sqlmodel import select
+
+    from shared.db import init_schema, make_engine, session_scope
+    from shared.models import Payer
+
+    engine = make_engine()
+    init_schema(engine)
+    with session_scope(engine) as s:
+        if s.exec(select(Payer)).first() is not None:
+            return
+
+    print("[app] empty DB — running seed_unified_demo")
+    from scripts.seed_unified_demo import main as seed_main
+
+    seed_main()
+
+
 @asynccontextmanager
 async def _composed_lifespan(_: FastAPI):
     """Run each sub-app's lifespan in sequence, tear down in reverse."""
     async with AsyncExitStack() as stack:
         for sub in _subapps:
             await stack.enter_async_context(sub.router.lifespan_context(sub))
+        _seed_if_empty()
         yield
 
 

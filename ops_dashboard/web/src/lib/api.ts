@@ -9,11 +9,17 @@ import { readSnapshot, snapshotExists } from "./snapshot";
 
 // Server-side fetch base. Local dev: the FastAPI on 127.0.0.1:8765.
 // Vercel: no live API, so the snapshot path takes over.
-const SERVER_BASE = process.env.OPS_API_BASE || "";
+// BOM strip: Vercel CLI's stdin-piped env values arrive with a UTF-8 BOM.
+const SERVER_BASE = (process.env.OPS_API_BASE || "")
+  .replace(/^﻿/, "")
+  .trim();
 // Browser-side: the Next rewrite at /api/* proxies to the FastAPI.
 const BROWSER_BASE = "/api";
 
-const FORCE_SNAPSHOT = process.env.NEXT_PUBLIC_USE_SNAPSHOT === "1";
+const FORCE_SNAPSHOT =
+  (process.env.NEXT_PUBLIC_USE_SNAPSHOT ?? "")
+    .replace(/^﻿/, "")
+    .trim() === "1";
 
 async function getJsonLive<T>(path: string): Promise<T> {
   const base = typeof window === "undefined" ? SERVER_BASE : BROWSER_BASE;

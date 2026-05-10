@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 
-const BROWSER_API = process.env.NEXT_PUBLIC_BROWSER_API_BASE ?? "";
+// Defensive strip of UTF-8 BOM + whitespace — Vercel CLI's `env add` via
+// stdin on Windows ships a BOM with piped values.
+const BROWSER_API = (process.env.NEXT_PUBLIC_BROWSER_API_BASE ?? "")
+  .replace(/^﻿/, "")
+  .trim();
 
 type Phase = "idle" | "running" | "done" | "error";
 
