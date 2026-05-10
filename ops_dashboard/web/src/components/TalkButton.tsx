@@ -80,6 +80,7 @@ export function TalkButton({ payerId, payerName }: { payerId: string; payerName:
         model: {
           provider: "custom-llm",
           model: "claude-haiku-4-5-20251001",
+          url: "https://invoice-agent-stack-169815310866.us-central1.run.app/voice/v1",
           messages: [
             {
               role: "system",
