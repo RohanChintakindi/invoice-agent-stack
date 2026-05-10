@@ -39,11 +39,12 @@ PAYERS = [
 
 import os
 
-# Default to the live demo_portal URLs on Fly so the browser-use adapter
-# (when run locally against this DB) hits a real, scrapeable target.
-# Override with PORTAL_BASE if you point at a different host.
+# Default to the live demo_portal URLs on Cloud Run so the browser-use
+# adapter (when run locally against this DB) hits a real, scrapeable
+# target. Override with PORTAL_BASE if you point at a different host.
 _PORTAL_BASE = os.getenv(
-    "PORTAL_BASE", "https://invoice-agent-stack-rohan.fly.dev/portal"
+    "PORTAL_BASE",
+    "https://invoice-agent-stack-169815310866.us-central1.run.app/portal",
 )
 
 PORTALS = [

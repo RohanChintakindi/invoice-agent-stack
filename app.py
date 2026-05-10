@@ -1,12 +1,12 @@
-"""Unified ASGI entrypoint for the Fly.io deployment.
+"""Unified ASGI entrypoint for the Cloud Run deployment.
 
 Mounts every vertical's FastAPI app under a path prefix so a single
-Fly app exposes all of them on one hostname:
+service exposes all of them on one hostname:
 
-    https://invoice-agent-stack.fly.dev/voice/v1/chat/completions
-    https://invoice-agent-stack.fly.dev/browser/jobs
-    https://invoice-agent-stack.fly.dev/recon/wires
-    https://invoice-agent-stack.fly.dev/ops/payers
+    https://invoice-agent-stack-169815310866.us-central1.run.app/voice/v1/chat/completions
+    https://invoice-agent-stack-169815310866.us-central1.run.app/browser/jobs
+    https://invoice-agent-stack-169815310866.us-central1.run.app/recon/wires
+    https://invoice-agent-stack-169815310866.us-central1.run.app/ops/payers
 
 Each sub-app has its own lifespan (DB engine, ranker load, harness
 wiring). Mounted sub-apps don't have their lifespans triggered by
@@ -17,7 +17,7 @@ shut down cleanly in reverse order.
 Run locally:
     uv run uvicorn app:main --host 0.0.0.0 --port 8000
 
-In Fly: the Dockerfile invokes the same uvicorn command on $PORT.
+In Cloud Run: the Dockerfile invokes the same uvicorn command on $PORT.
 """
 
 from __future__ import annotations
@@ -31,11 +31,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Browser orchestration requires a Fernet vault key. In production this
-# comes from `fly secrets set VAULT_KEY=...`. For local dev / first-boot
-# of an empty Fly app, fall back to an ephemeral key with a warning so
-# the service still starts. Anything stored in the vault under an
-# ephemeral key is unreadable after restart, which is fine — the demo
-# always re-seeds.
+# comes from a Cloud Run env var (set via `gcloud run services update
+# --update-env-vars VAULT_KEY=...`). For local dev / first-boot of an
+# empty service, fall back to an ephemeral key with a warning so the
+# service still starts. Anything stored in the vault under an ephemeral
+# key is unreadable after restart, which is fine — the demo always
+# re-seeds.
 if not os.getenv("VAULT_KEY"):
     from browser_orchestration.vault import generate_key
 

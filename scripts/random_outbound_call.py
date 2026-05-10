@@ -5,7 +5,7 @@ selects the most overdue invoice for that payer, and asks Vapi to dial
 the configured outbound number with rich context (payer_id, invoice_id,
 amount, days overdue) baked into the assistant variables.
 
-The voice agent on Fly reads `payer_id` from the assistant prompt's
+The voice agent on Cloud Run reads `payer_id` from the assistant prompt's
 [payer_id=...] tag (or call.metadata) and pulls the rest from its DB,
 so the LLM has the full picture by turn 1.
 

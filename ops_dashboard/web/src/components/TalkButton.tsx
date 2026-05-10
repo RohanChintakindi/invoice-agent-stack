@@ -71,7 +71,23 @@ export function TalkButton({ payerId, payerName }: { payerId: string; payerName:
     setPhase("connecting");
     try {
       // Web SDK takes AssistantOverrides directly as the second arg.
+      // Render the system prompt client-side with the real payer baked in.
+      // Vapi's `variableValues` substitution into `{{payer_id}}` doesn't
+      // fire reliably for Web SDK calls, so we override `model.messages`
+      // with literal content the LLM webhook can extract via its
+      // [payer_id=...] regex.
       await vapiRef.current.start(VAPI_ASSISTANT_ID, {
+        model: {
+          provider: "custom-llm",
+          model: "claude-haiku-4-5-20251001",
+          messages: [
+            {
+              role: "system",
+              content: `You are an Iridium accounts-receivable agent calling ${payerName} about a past-due invoice. Stay professional and human. The current call is about payer [payer_id=${payerId}].`,
+            },
+          ],
+        },
+        firstMessage: `Hi, this is Iridium calling about an outstanding invoice for ${payerName}. Do you have a moment?`,
         variableValues: {
           payer_id: payerId,
           payer_name: payerName,

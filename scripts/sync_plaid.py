@@ -71,7 +71,7 @@ TOKEN_CACHE = Path(__file__).resolve().parent.parent / ".plaid_sandbox.json"
 # webhook flow completes. The endpoint just needs to return 200.
 PLAID_WEBHOOK_URL = os.getenv(
     "PLAID_WEBHOOK_URL",
-    "https://invoice-agent-stack-rohan.fly.dev/recon/webhooks/plaid",
+    "https://invoice-agent-stack-169815310866.us-central1.run.app/recon/webhooks/plaid",
 )
 
 

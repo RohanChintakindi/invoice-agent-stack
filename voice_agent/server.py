@@ -205,8 +205,21 @@ async def health() -> dict:
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
+    # Debug: dump request shape so we can see what Vapi actually sends.
+    # Strip message contents to avoid log spam; just role + length.
+    msg_summary = [{"role": m.role, "len": len(m.content)} for m in req.messages]
+    call_meta = (req.call or {}).get("metadata") if isinstance(req.call, dict) else None
+    print(
+        f"[voice] /v1/chat/completions stream={req.stream} payer_id={req.payer_id} "
+        f"messages={msg_summary} call_meta={call_meta}",
+        flush=True,
+    )
+
     payer_id = extract_payer_id(req)
     if not payer_id:
+        # Log first system message to see if {{payer_id}} got templated.
+        first_sys = next((m.content for m in req.messages if m.role == "system"), "")
+        print(f"[voice] payer_id extraction failed; first system msg: {first_sys[:200]!r}", flush=True)
         raise HTTPException(
             status_code=400,
             detail="payer_id required (body, call.metadata, or [payer_id=...] system tag).",
@@ -215,6 +228,7 @@ async def chat_completions(req: ChatCompletionRequest):
     call_id = extract_call_id(req)
     user_message = find_user_message(req.messages)
     if not user_message:
+        print(f"[voice] no user message; payer={payer_id} messages={msg_summary}", flush=True)
         raise HTTPException(status_code=400, detail="no user message found")
 
     sessions: SessionStore = app.state.sessions

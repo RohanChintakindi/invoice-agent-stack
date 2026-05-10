@@ -9,13 +9,13 @@ TrustEvent (CLEAN_EXTRACTION_STREAK on pass, SILENT_FAIL_CAUGHT on
 silent fail). Final output prints the trust events that fired so you
 can verify the cross-vertical loop is wired.
 
-Operates against the live Fly demo portal:
-    https://invoice-agent-stack-rohan.fly.dev/portal/{portal_id}/
+Operates against the live Cloud Run demo portal:
+    https://invoice-agent-stack-169815310866.us-central1.run.app/portal/{portal_id}/
 
-Trust events land in a *local* SQLite DB (not Fly's volume). To see
-them on the Fly dashboard, the worker process would need to run on a
-machine with Chromium that has access to the Fly DB — production
-deployment, not demo.
+Trust events land in a *local* SQLite DB (not Cloud Run's /tmp). To
+see them on the production dashboard, the worker process would need
+to run on a machine with Chromium that has access to the production
+DB — production deployment, not demo.
 
 Run:
     uv sync --extra real-browser
@@ -51,7 +51,10 @@ from shared.models import Payer, TrustEventRecord
 from voice_agent.llm import FakeLLMClient
 
 
-FLY_BASE = os.getenv("FLY_BASE", "https://invoice-agent-stack-rohan.fly.dev")
+SERVICE_BASE = os.getenv(
+    "SERVICE_BASE",
+    "https://invoice-agent-stack-169815310866.us-central1.run.app",
+)
 PORTAL_USERNAME = "ap@example"
 PORTAL_PASSWORD = "hunter2"
 
@@ -64,14 +67,14 @@ PORTALS_TO_RUN = [
 
 def _seed_minimum(engine, vault: CredentialVault) -> None:
     """Make sure the bare minimum DB rows exist: payers, portals (with
-    their base_url pointing at the live Fly demo portal), and vault
+    their base_url pointing at the live Cloud Run demo portal), and vault
     entries with the demo credentials."""
     with session_scope(engine) as s:
         for portal_id, payer_id, _ in PORTALS_TO_RUN:
             if s.get(Payer, payer_id) is None:
                 s.add(Payer(payer_id=payer_id, name=payer_id.title()))
 
-            base_url = f"{FLY_BASE}/portal/{portal_id}/"
+            base_url = f"{SERVICE_BASE}/portal/{portal_id}/"
             existing = s.get(Portal, portal_id)
             if existing is None:
                 s.add(Portal(
@@ -156,7 +159,7 @@ def main() -> int:
 
     headless = os.getenv("BROWSER_HEADLESS", "false").lower() in ("1", "true", "yes")
     primary_model = os.getenv("BROWSER_USE_MODEL")  # None → adapter default
-    print(f"FLY_BASE       : {FLY_BASE}")
+    print(f"SERVICE_BASE       : {SERVICE_BASE}")
     print(f"headless       : {headless}")
     print(f"primary model  : {primary_model or '(adapter default — Haiku)'}")
     print(f"fallback model : claude-sonnet-4-6")

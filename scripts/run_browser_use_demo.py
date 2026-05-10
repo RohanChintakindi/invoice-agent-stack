@@ -35,8 +35,9 @@ from browser_orchestration.models import JobAction
 from browser_orchestration.validator import validate
 
 
-FLY_BASE = os.getenv(
-    "FLY_BASE", "https://invoice-agent-stack-rohan.fly.dev"
+SERVICE_BASE = os.getenv(
+    "SERVICE_BASE",
+    "https://invoice-agent-stack-169815310866.us-central1.run.app",
 )
 USERNAME = "ap@example"
 PASSWORD = "hunter2"
@@ -54,7 +55,7 @@ def _run_one(adapter: BrowserUseAdapter, portal_id: str, label: str) -> None:
 
     req = HarnessRequest(
         portal_id=portal_id,
-        base_url=f"{FLY_BASE}/portal/{portal_id}/",
+        base_url=f"{SERVICE_BASE}/portal/{portal_id}/",
         action=JobAction.EXTRACT_INVOICES,
         payload={},
         username=USERNAME,
@@ -91,7 +92,7 @@ def main() -> int:
     # us hand-tuning the model up front. Override with BROWSER_USE_MODEL.
     primary_model = os.getenv("BROWSER_USE_MODEL")  # None → adapter default
 
-    print(f"FLY_BASE       : {FLY_BASE}")
+    print(f"SERVICE_BASE       : {SERVICE_BASE}")
     print(f"headless       : {headless}")
     print(f"primary model  : {primary_model or '(adapter default — Haiku)'}")
     print(f"fallback model : claude-sonnet-4-6 (auto-escalation)")

@@ -2,7 +2,7 @@
 
 Use this when the seed-events pattern from the old seed_unified_demo
 left fake activity in the DB and you want a clean timeline before a
-demo without nuking the SQLite file (the Fly volume).
+demo without nuking the SQLite file.
 
 Kept (structural):
   - Payer

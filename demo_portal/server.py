@@ -89,7 +89,7 @@ def _login_page(portal_id: str, error: str | None = None) -> str:
     # `action="login"` is relative to the current page (e.g. /portal/acme_portal/)
     # so the form submits to /portal/acme_portal/login regardless of mount prefix.
     # Absolute paths like /{portal_id}/login break when this sub-app is mounted
-    # under /portal/ on the unified Fly app.
+    # under /portal/ on the unified Cloud Run app.
     return f"""<!doctype html>
 <html>
 <head><title>{title} — Sign in</title></head>

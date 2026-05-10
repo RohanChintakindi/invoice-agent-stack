@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for the unified Fly.io deployment.
+# Multi-stage Dockerfile for the unified Cloud Run deployment.
 #
 #   Stage 1 builds the venv with uv (fast, deterministic).
 #   Stage 2 is a slim runtime image that only ships the venv + app code.
@@ -36,7 +36,7 @@ WORKDIR /app
 # Copy the prepared venv + app code from the builder.
 COPY --from=builder /app /app
 
-# Fly injects $PORT — bind to it. Single uvicorn worker keeps the
+# Cloud Run injects $PORT — bind to it. Single uvicorn worker keeps the
 # in-memory state machine + ranker happy on the small free-tier VM.
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app:main --host 0.0.0.0 --port ${PORT:-8000}"]
